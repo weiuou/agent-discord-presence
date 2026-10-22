@@ -10,7 +10,7 @@ import type {Agent} from './protocol.js';
 import type {SessionStore} from './store.js';
 import {runDimagent} from './dimagent.js';
 
-export interface ModelContext {model?: string; provider?: string}
+export interface ModelContext {model?: string; provider?: string; purpose?: 'task'}
 export type Generate = (agent: Agent, response: string, signal: AbortSignal, context?: ModelContext) => Promise<Summary>;
 export function codexGenerator(config: Partial<PromptConfig> & {model?: string} = {}): Generate {
   return async (agent, response, signal) => {
@@ -117,7 +117,7 @@ export async function generateSummary(settings: import('./settings.js').Settings
   if (!model) throw new GenerationError('Current model unavailable; set config model explicitly');
   const config = {...settings, model};
   if (settings.service === 'session' && agent === 'codex') return codexGenerator(config)(agent, response, signal);
-  const input = buildPresencePrompt({agent, response}, config);
+  const input = buildPresencePrompt({agent, response, purpose: context.purpose}, config);
   let value: unknown;
   if (settings.service === 'openai-compatible') {
     if (!settings.baseUrl) throw new GenerationError('Set config baseUrl for the OpenAI-compatible service');

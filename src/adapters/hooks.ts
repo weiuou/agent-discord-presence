@@ -1,6 +1,7 @@
 import {emit, request} from '../client.js';
 import type {Agent, PresenceEvent, State} from '../protocol.js';
 import {boundedResponse} from '../completion.js';
+import {dimagentActivity} from '../dimagent-live.js';
 export const hookEvents = {
   codex: ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PermissionRequest', 'Stop', 'Interrupt', 'SessionEnd'],
   'claude-code': ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Notification', 'Stop', 'StopFailure', 'SessionEnd'],
@@ -48,9 +49,10 @@ export async function runHook(agent: HookAgent): Promise<void> {
     }
     const payload = JSON.parse(data);
     const event = hookEvent(agent, payload, now);
-    if (event && agent === 'dimagent' && payload.hook_event_name === 'Stop') {
-      const runId = payload.run_id;
-      await request({type: 'event', event, ...(typeof runId === 'string' && runId.length <= 256 ? {dimagentRunId: runId} : {})});
+    if (event && agent === 'dimagent') {
+      const runId = payload.hook_event_name === 'Stop' ? payload.run_id : undefined;
+      await request({type: 'event', event, dimagentActivity: dimagentActivity(payload),
+        ...(typeof runId === 'string' && runId.length <= 256 ? {dimagentRunId: runId} : {})});
     } else if (event) await emit(event);
   } catch { /* Hooks are advisory and must emit no model context. */ }
   finally { clearTimeout(timer); process.stdin.destroy(); }

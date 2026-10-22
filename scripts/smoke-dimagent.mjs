@@ -9,6 +9,7 @@ import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startDaemon} from '../dist/daemon.js';
+import {request} from '../dist/client.js';
 import {ipcPath} from '../test/ipc-path.js';
 
 const command = process.argv[2];
@@ -24,21 +25,36 @@ await writeFile(process.env.ADP_CONFIG, '{"enabled":true}');
 const states = [];
 let calls = 0;
 let summaries = 0;
+let taskTitles = 0;
+let daemon;
 const model = createServer((req, res) => {
   let body = '';
   req.on('data', chunk => { body += chunk; });
-  req.on('end', () => {
+  req.on('end', async () => {
     calls++;
     const input = JSON.parse(body);
     assert.equal(input.model, 'adp-test');
     const summary = input.response_format?.type === 'json_object' || JSON.stringify(input).includes('Return only JSON matching this schema');
+    const taskTitle = summary && JSON.stringify(input).includes('userGoal');
     if (summary) {
       summaries++;
+      if (taskTitle) taskTitles++;
       assert.ok(!input.tools || input.tools.length === 0, 'Summary worker must have no tools');
-      assert.ok(JSON.stringify(input).includes('Local presence smoke test completed.'));
-      assert.ok(!JSON.stringify(input).includes('PRIVATE_USER_SENTINEL'), 'User prompt must not reach the summary worker');
+      if (taskTitle) {
+        assert.ok(JSON.stringify(input).includes('Run the local presence test.'));
+        assert.ok(!JSON.stringify(input).includes('secret_test_value123'), 'Task title must filter common credentials');
+      } else {
+        assert.ok(JSON.stringify(input).includes('Local presence smoke test completed.'));
+        assert.ok(!JSON.stringify(input).includes('PRIVATE_USER_SENTINEL'), 'User prompt must not reach the completion summary worker');
+      }
     }
-    const content = summary ? JSON.stringify({topic: 'Testing automatic DimAgent summaries', subtitle: 'Completed reply only'}) : 'Local presence smoke test completed.';
+    // Keep the primary task active while the independent title worker runs.
+    if (!summary && input.tools?.length) {
+      const deadline = Date.now() + 20_000;
+      while (![...daemon.store.sessions.values()].some(s => s.summary?.topic === 'Preparing DimAgent presence test') && Date.now() < deadline) await delay(50);
+      assert.ok([...daemon.store.sessions.values()].some(s => s.state === 'working' && s.summary?.topic === 'Preparing DimAgent presence test'), `Task title must appear before the main run ends: ${JSON.stringify(await request({type: 'status'}, daemon.path))}`);
+    }
+    const content = summary ? JSON.stringify({topic: taskTitle ? 'Preparing DimAgent presence test' : 'Testing automatic DimAgent summaries', subtitle: taskTitle ? 'Requested work' : 'Completed reply only'}) : 'Local presence smoke test completed.';
     if (input.response_format?.type === 'json_object') {
       res.writeHead(200, {'Content-Type': 'application/json'});
       res.end(JSON.stringify({choices: [{message: {content}}]})); return;
@@ -50,7 +66,6 @@ const model = createServer((req, res) => {
     chunk({}, 'stop'); res.end('data: [DONE]\n\n');
   });
 });
-let daemon;
 try {
   await new Promise(resolve => model.listen(0, '127.0.0.1', resolve));
   if (external) await writeFile(process.env.ADP_CONFIG, JSON.stringify({agents: {dimagent: {
@@ -84,7 +99,7 @@ try {
   assert.equal(installed.hooks, 'hooks/hooks.json');
   await run(command, ['provider', 'add', 'adp-test', '--adapter', 'openai', '--base-url',
     `http://127.0.0.1:${model.address().port}/v1`, '--api-key', 'local-fake-key', '--model', 'adp-test']);
-  await run(command, ['exec', '--provider', 'adp-test', '--model', 'adp-test', '--policy', 'read-only', '--tools', 'read', 'PRIVATE_USER_SENTINEL: Run the local presence test.']);
+  await run(command, ['exec', '--provider', 'adp-test', '--model', 'adp-test', '--policy', 'read-only', '--tools', 'read', 'PRIVATE_USER_SENTINEL: Run the local presence test. token=secret_test_value123']);
   assert.ok(calls > 0, 'Host must call the local model');
   assert.ok(states.includes('Working'), 'UserPromptSubmit must reach ADP');
   assert.ok(states.includes('Ready for a prompt'), 'SessionStart/Stop must reach ADP');
@@ -96,7 +111,8 @@ try {
   assert.equal(daemon.store.sessions.get(key)?.summary?.topic, 'Testing automatic DimAgent summaries', JSON.stringify(daemon.store.sessions.get(key)));
   await run(process.execPath, [join(root, 'dist/cli.js'), 'summary', `dimagent:${session.sessionId}`, 'Testing DimAgent']);
   assert.equal(daemon.store.sessions.get(key)?.summary?.topic, 'Testing DimAgent');
-  console.log(JSON.stringify({version, service: external ? 'openai-compatible' : 'session', hooks: Object.keys(hooks.hooks).length, modelCalls: calls, automaticSummaries: summaries, states: [...new Set(states)], result: 'passed'}, null, 2));
+  assert.ok(taskTitles > 0);
+  console.log(JSON.stringify({version, service: external ? 'openai-compatible' : 'session', hooks: Object.keys(hooks.hooks).length, modelCalls: calls, taskTitles, automaticSummaries: summaries, states: [...new Set(states)], result: 'passed'}, null, 2));
 } finally {
   await daemon?.close();
   await new Promise(resolve => model.close(resolve));

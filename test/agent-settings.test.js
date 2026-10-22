@@ -35,6 +35,8 @@ test('CLI scoped set/unset/show and presets preserve other agents and global def
   await writeFile(path, JSON.stringify({customPrompt: 'Global style', agents: {'deepseek-harness': {customPrompt: '中文'}}}));
   const cli = (...args) => JSON.parse(execFileSync(process.execPath, ['dist/cli.js', ...args], {encoding: 'utf8', env: {...process.env, ADP_CONFIG: path}, stdio: ['ignore', 'pipe', 'pipe']}));
   assert.equal(cli('config', 'set', 'enabled', 'false', '--agent', 'codex').enabled, false);
+  assert.equal(cli('config', 'set', 'liveSummaries', 'false', '--agent', 'dimagent').liveSummaries, false);
+  assert.equal(cli('config', 'show', '--agent', 'codex').liveSummaries, true);
   cli('config', 'set', 'maxLength', '60', '--agent', 'codex');
   cli('config', 'set', 'presence.assets.large_image', 'codex', '--agent', 'codex');
   cli('preset', 'apply', 'minimal', '--agent', 'codex');
@@ -46,6 +48,7 @@ test('CLI scoped set/unset/show and presets preserve other agents and global def
   const saved = await readFile(path, 'utf8');
   assert.equal(JSON.parse(saved).agents.codex.maxLength, 60);
   assert.throws(() => cli('config', 'set', 'maxLength', 'bad', '--agent', 'codex'));
+  assert.throws(() => cli('config', 'set', 'liveSummaries', 'invalid', '--agent', 'dimagent'));
   assert.throws(() => cli('config', 'show', '--agent', 'unknown'));
   assert.equal(await readFile(path, 'utf8'), saved);
 });

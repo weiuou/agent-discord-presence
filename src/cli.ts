@@ -91,7 +91,7 @@ async function main() {
           if (['presets', 'presence', 'presence.assets', 'presence.timestamps', 'presence.party', 'presence.buttons', 'presence.party.size'].includes(key)) value = JSON.parse(raw);
           else if (['presence.type', 'presence.status_display_type', 'presence.timestamps.end', 'maxLength'].includes(key) || (key === 'presence.timestamps.start' && raw !== 'session')) value = Number(raw);
           else if (['presence.details', 'presence.state'].includes(key) && raw === 'null') value = null;
-          else if (key === 'enabled') value = raw === 'true' ? true : raw === 'false' ? false : raw;
+          else if (key === 'enabled' || key === 'liveSummaries') value = raw === 'true' ? true : raw === 'false' ? false : raw;
         }
         await saveSetting(key, value, argument === 'unset', agent);
       }

@@ -12,9 +12,10 @@ import {buildPresencePrompt} from './prompts.js';
 import {boundedResponse} from './completion.js';
 import {nativeSummarySettings, type NativeSummaryJob} from './native-summary.js';
 import {DimagentCompletion, type DimagentRead} from './dimagent.js';
+import {DimagentLive, type DimagentModelRead} from './dimagent-live.js';
 export interface Transport {status: string; readonly acknowledged?: boolean; start(): void; setActivity(activity: Activity | null): void; stop(): void}
 export async function startDaemon(options: {clientId?: string; dryRun?: boolean; path?: string; staleMs?: number;
-  transport?: Transport; log?: (message: string) => void; generate?: Generate; generationTimeoutMs?: number; dimagentRead?: DimagentRead} = {}) {
+  transport?: Transport; log?: (message: string) => void; generate?: Generate; generationTimeoutMs?: number; dimagentRead?: DimagentRead; dimagentModelRead?: DimagentModelRead} = {}) {
   const path = options.path ?? socketPath();
   const log = options.log ?? console.log;
   const clientId = options.clientId ?? DISCORD_CLIENT_ID;
@@ -59,6 +60,10 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
     if (!settings.enabled) throw new Error('Summary generation disabled');
     return generateSummary(settings, agent, response, signal, context);
   }), () => transport.setActivity(currentActivity()), options.generationTimeoutMs);
+  const live = new DimagentLive(store, () => ({...resolveSettings(settings, 'dimagent'),
+    enabled: (!options.dryRun || !!options.generate) && resolveSettings(settings, 'dimagent').enabled}),
+    options.generate ?? ((agent, source, signal, context) => generateSummary(resolveSettings(loadSettings(), agent), agent, source, signal, context)),
+    () => transport.setActivity(currentActivity()), options.dimagentModelRead);
   const completion = new DimagentCompletion(store, () => (!options.dryRun || !!options.generate) && resolveSettings(settings, 'dimagent').enabled,
     (key, reply) => {
       const session = store.sessions.get(key)!;
@@ -67,9 +72,9 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
     }, options.dimagentRead);
   function currentActivity() {
     const session = store.select();
-    return activityFor(session, resolveSettings(settings, session?.agent).presence);
+    return activityFor(live.display(session), resolveSettings(settings, session?.agent).presence);
   }
-  function refresh() { reloadSettings(); store.sweep(); completion.reconcile(); generation.reconcile(); transport.setActivity(currentActivity()); }
+  function refresh() { reloadSettings(); store.sweep(); live.reconcile(); completion.reconcile(); generation.reconcile(); transport.setActivity(currentActivity()); }
   const server = createServer(socket => {
     socket.setEncoding('utf8');
     sockets.add(socket); socket.on('close', () => sockets.delete(socket));
@@ -100,12 +105,17 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
           store.setSummary(job.key, message.summary, job.updatedAt, job.startedAt);
         }
         else if (message.type === 'event') store.update(message.event);
-        else if (message.type === 'summary') store.setSummary(message.key, message.summary, message.expectedUpdatedAt, message.expectedStartedAt);
+        else if (message.type === 'summary') { store.setSummary(message.key, message.summary, message.expectedUpdatedAt, message.expectedStartedAt); live.manual(message.key); }
         else if (message.type === 'pin') store.pin(message.key);
         else if (message.type !== 'status') throw new Error('Unknown request type');
         refresh();
-        if (message.type === 'event' && message.event.agent === 'dimagent' && message.event.state === 'idle' &&
+        if (message.type === 'event' && message.event.agent === 'dimagent' &&
             store.sessions.get(sessionKey(message.event))?.updatedAt === message.event.updatedAt && !message.event.heartbeat) {
+          live.handle(sessionKey(message.event), message.dimagentActivity);
+          transport.setActivity(currentActivity());
+        }
+        if (message.type === 'event' && message.event.agent === 'dimagent' && message.event.state === 'idle' &&
+            store.sessions.get(sessionKey(message.event))?.updatedAt === message.event.updatedAt && !message.event.heartbeat && live.allowsCompletion(sessionKey(message.event))) {
           completion.enqueue(sessionKey(message.event), message.dimagentRunId);
         }
         let nativeSummary: NativeSummaryJob | undefined;
@@ -131,6 +141,7 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
           agentSettings: Object.fromEntries([...new Set([...store.sessions.values()].map(s => s.agent))].map(agent => [agent, resolveSettings(settings, agent)])),
           generation: {...generation.status, ...settings, ...resolveSettings(settings), modelPolicy: 'override-or-session'},
           dimagentCapture: completion.status,
+          dimagentLive: live.status,
           sessions: [...store.sessions.values()].map(s => ({key: sessionKey(s), state: s.state, model: s.model, provider: s.provider, startedAt: s.startedAt, updatedAt: s.updatedAt, lastSeen: s.lastSeen, summary: s.summary})),
         } : {ok: true, nativeSummary}) + '\n');
       } catch (error) { socket.end(JSON.stringify({ok: false, error: (error as Error).message}) + '\n'); }
@@ -150,7 +161,7 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
     return closing ??= (async () => {
       clearInterval(ticker); transport.stop();
       const closed = new Promise<void>(resolve => server.close(() => resolve()));
-      await completion.close(); await generation.close();
+      await live.close(); await completion.close(); await generation.close();
       for (const socket of sockets) if (socket !== reply) socket.destroy();
       reply?.end(JSON.stringify({ok: true}) + '\n', () => reply.destroy());
       await closed;

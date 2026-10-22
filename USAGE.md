@@ -427,6 +427,22 @@ node scripts/smoke-dimagent.mjs /absolute/path/to/dim
 
 Verified on Windows x64 with DimAgent 0.5.21 and Node 24.13.0. Approval, subagent ID mapping, expiry, malformed input, privacy and offline behavior are additionally covered by contract/integration tests. Live Discord rendering and interactive TUI approvals have not been tested for this adapter.
 
+#### DimAgent Desktop
+
+The installed Windows Desktop 0.9.56 bundle was inspected separately: it loads the same command-hook schema, the same plugin `hooks` manifest entry, and the global `hooks.json` from its DimAgent home. It registers those hooks when preparing a session. The CN desktop defaults to `~/.dimcode/v2`, shared with the `dim` CLI; `DIMCODE_HOME` can select a different home. The existing adapter can therefore be reused without a separate desktop protocol.
+
+For desktop use, generated hooks with absolute executable paths avoid depending on the GUI's inherited PATH:
+
+```sh
+node dist/cli.js config dimagent
+```
+
+Merge the printed entries into the desktop's `<DIMCODE_HOME>/hooks.json` (CN default: `~/.dimcode/v2/hooks.json`), preserving existing hooks, then start a new desktop session. Restart Desktop to reload hooks for existing sessions. Start the ADP daemon with `node dist/cli.js start -b` before running a task. The adapter's manual-summary and silence-timeout limitations above also apply to Desktop.
+
+The bundled plugin is another option when the installed `agent-discord-presence` command is on Desktop's PATH. Install it into the same home using the matching CLI and restart Desktop. Avoid installing both methods together.
+
+This confirms the installed Desktop's loading code and payload compatibility. The real-host smoke script also passed against its bundled `resources/runtime/cli/dim.exe` (CLI 0.5.20): plugin installation, Working/Idle transitions and a manual summary. That exercises the bundled CLI rather than the Electron GUI; live GUI/Discord verification is still outstanding.
+
 ### OpenCode
 
 ```sh

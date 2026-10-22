@@ -80,7 +80,7 @@ adp config set provider '' --agent deepseek-harness
 adp config set customPrompt '用中文描述当前工作。' --agent deepseek-harness
 ```
 
-For adapters that supply completed replies, `service: session` with empty model/provider overrides uses the session model. DimAgent currently supplies lifecycle events only (see its setup section). Harness also reuses its in-process provider credentials. You can independently configure `enabled`, `service`, `model`, `provider`, `baseUrl`, `apiKeyEnv`, `customPrompt`, `maxLength`, and all `presence` fields. `enabled` controls automatic summaries, not lifecycle reporting.
+For adapters that supply completed replies, `service: session` with empty model/provider overrides uses the session model. DimAgent obtains the completed reply and model route from a local export of the exact Stop run (see its setup section). Harness also reuses its in-process provider credentials. You can independently configure `enabled`, `service`, `model`, `provider`, `baseUrl`, `apiKeyEnv`, `customPrompt`, `maxLength`, and all `presence` fields. `enabled` controls automatic summaries, not lifecycle reporting.
 
 Inspect effective settings or remove an override:
 
@@ -164,7 +164,7 @@ The bundled presets are `default`, `minimal`, `playful`, `codex`, `claude-code`,
 
 The package includes a default activity-writing prompt in [`prompts/presence.md`](prompts/presence.md), editable preferences in [`prompts/default.json`](prompts/default.json), and configuration presets in [`presets.json`](presets.json).
 
-Automatic summaries are enabled by default for adapters that supply completed replies. DimAgent 0.5.21 does not include replies in its command hooks and supports manual summaries only. After a completed reply, the adapter sends at most 4,000 Unicode characters of assistant text to the local service. A background worker uses this prompt to generate the activity title and subtitle. It never reads transcript files. These prompts generate activity text, not full plugin settings such as images, buttons, or timers.
+Automatic summaries are enabled by default for adapters that supply completed replies. DimAgent uses a bounded local session export keyed by Stop.run_id because its hook payload omits the reply. After a completed reply, the adapter sends at most 4,000 Unicode characters of assistant text to the local service. A background worker uses this prompt to generate the activity title and subtitle. It never reads transcript files. These prompts generate activity text, not full plugin settings such as images, buttons, or timers.
 
 Print the complete system prompt, configuration, and JSON output schema:
 
@@ -207,7 +207,7 @@ Default behavior is `service: "session"` with an empty `model` override. The wor
 | Pi | Assistant text blocks, submitted at `agent_settled`; model/provider from context | `pi --print`, no tools/extensions/skills or saved session |
 | OpenCode | Assistant message text parts, submitted at idle; model/provider from message metadata | `opencode run`, all tool permissions denied; summary runs appear in OpenCode session history |
 | DeepSeek Harness | Completed assistant text, submitted at actual idle; model/provider from message source | In-process `ctx.llm.stream`, reusing Harness provider credentials; no tools or conversation history |
-| DimAgent | No completed reply in the public command-hook payload | Not available; use manual summaries |
+| DimAgent | Final assistant text of Stop.run_id from a bounded local session export; model/provider from exported session metadata | Fresh dim exec with no tools, hooks disabled, read-only policy and the same configured home/credentials; auxiliary sessions may persist |
 
 For CLI-based adapters, the native CLI must be available to the service and already authenticated. Current CLI flags are required; in particular Claude Code must support `--safe-mode`. Model definitions or credentials available only inside an agent's project may not be available in the worker's temporary working directory. Codex workers skip the user config to avoid inheriting unrelated MCP integrations; custom Codex model-provider definitions should use the explicit API service below. This follows the session model ID, not its reasoning effort or the entire original conversation.
 
@@ -408,7 +408,29 @@ Merge the printed `hooks` entries into the DimAgent home directory's `hooks.json
 
 The command-hook API has no `SessionEnd`, `Interrupt`, `StopFailure`, or `PostToolUseFailure` event. Exit, cancellation, and errors therefore have no distinct reliable event mapping. Sessions expire after the hook silence timeout (default 30 minutes, configurable with `start --stale-minutes N`), including idle sessions left after exiting the CLI. A denied permission may remain Waiting until the next lifecycle event or timeout. `Stop` is advisory: another hook can request continuation, causing transient Idle until another activity event arrives.
 
-The current `Stop` payload has no completed assistant reply. This adapter never reads transcripts or invokes a summary model, even when automatic summaries are enabled globally. It forwards the model name only when the host supplies it (the tested one-shot host supplied no model name). Use a manual public summary or display override:
+The current `Stop` payload has no completed assistant reply, but it includes `run_id`. The hook immediately publishes Idle and sends that identifier to ADP. In the background, the daemon invokes `dim session export SESSION_ID`, selects the final assistant text belonging to that exact session and run, and submits at most 4,000 Unicode characters to the existing summary worker. It obtains the model/provider route from the export; explicit per-agent model/provider settings still take precedence. New work or a manual summary edit invalidates pending capture/generation.
+
+Automatic summaries are enabled by default. With `service: session`, ADP invokes a fresh `dim exec --json --no-hooks --policy read-only --tools ''` request using the configured DimAgent home and credentials. This call has no tools or original conversation history: it receives the presence prompt/schema and the bounded assistant reply. Both export and generation set `ADP_SUMMARY_WORKER=1` and `DIM_DISABLE_HOOKS=1`, preventing helper sessions from reporting presence or recursively scheduling summaries. Native auxiliary calls can appear in DimAgent's persisted session history, consume model usage, and keep their own logs; they are not ephemeral.
+
+Use the native command and data home matching your Desktop/CLI. `ADP_DIMAGENT_COMMAND` selects the executable; on Windows ADP discovers the standard Desktop installation's `resources/runtime/cli/dim.exe` when available, otherwise it uses `dim` from PATH. On Windows without Desktop, set the absolute path of a native executable rather than an npm `.cmd` shim. `DIMCODE_HOME` must refer to the home containing the session and model credentials. These variables belong in the **daemon's environment**, followed by a service restart; no executable or data-directory path is accepted from hook input. For example in PowerShell:
+
+```powershell
+$env:ADP_DIMAGENT_COMMAND = "$env:LOCALAPPDATA/Programs/DimAgent/resources/runtime/cli/dim.exe"
+$env:DIMCODE_HOME = "$env:USERPROFILE/.dimcode/v2"
+node dist/cli.js start -b
+```
+
+Configure summary style/model normally, or select the existing OpenAI-compatible service with `--agent dimagent`:
+
+```sh
+adp config set customPrompt '用简洁中文描述已完成的任务。' --agent dimagent
+adp config set service session --agent dimagent
+adp config set enabled false --agent dimagent
+```
+
+Disabling summaries skips both session export and model calls, keeping lifecycle reporting active. `adp status` includes `dimagentCapture` counters and a content-free diagnostic; model worker results/errors remain under `generation`. A local export is capped at 8 MiB / 10,000 messages; capture has a 15-second deadline and retries missing final text up to three times. Oversized/unavailable exports, missing or mismatched run IDs, later runs, terminal notices and tool-call endings skip the summary instead of reusing an earlier reply. The model only receives final assistant text; ADP does temporarily read the local export, which can contain the rest of that session, and does not persist or log it. It does not use user prompts, reasoning, tool arguments or tool results as summary input. A daemon serving a different DimAgent home will fail capture rather than guess a session.
+
+Manual public summaries and display overrides remain available:
 
 ```sh
 adp status
@@ -416,13 +438,14 @@ adp summary 'dimagent:SESSION_ID' 'Adapting Discord presence' 'Checking lifecycl
 adp config set presence.name 'Coding with DimAgent' --agent dimagent
 ```
 
-Prompts, transcript paths, working directories, tool arguments and tool results are not sent to the daemon. Hooks emit no output and tolerate a stopped daemon. The summary-worker recursion guard also applies to DimAgent hooks.
+Hooks themselves send only lifecycle fields and the Stop run ID, with no prompts, transcript paths, working directories or tool data. They emit no output, do not wait for export/model calls, and tolerate a stopped daemon.
 
-The real-host smoke check installs the plugin into a temporary DimAgent home, calls a local fake model, checks Working/Idle and manual summaries through the real daemon, and uses a fake Discord transport. It neither needs provider credentials nor changes Discord activity:
+The real-host smoke check installs the plugin into a temporary DimAgent home, calls a local fake model, checks Working/Idle, automatic and manual summaries through the real daemon, and uses a fake Discord transport. It also verifies that the summary request has no tools or original user prompt. It neither needs provider credentials nor changes Discord activity:
 
 ```sh
 npm run build
 node scripts/smoke-dimagent.mjs /absolute/path/to/dim
+node scripts/smoke-dimagent.mjs /absolute/path/to/dim --external
 ```
 
 Verified on Windows x64 with DimAgent 0.5.21 and Node 24.13.0. Approval, subagent ID mapping, expiry, malformed input, privacy and offline behavior are additionally covered by contract/integration tests. Live Discord rendering and interactive TUI approvals have not been tested for this adapter.
@@ -437,11 +460,11 @@ For desktop use, generated hooks with absolute executable paths avoid depending 
 node dist/cli.js config dimagent
 ```
 
-Merge the printed entries into the desktop's `<DIMCODE_HOME>/hooks.json` (CN default: `~/.dimcode/v2/hooks.json`), preserving existing hooks, then start a new desktop session. Restart Desktop to reload hooks for existing sessions. Start the ADP daemon with `node dist/cli.js start -b` before running a task. The adapter's manual-summary and silence-timeout limitations above also apply to Desktop.
+Merge the printed entries into the desktop's `<DIMCODE_HOME>/hooks.json` (CN default: `~/.dimcode/v2/hooks.json`), preserving existing hooks, then start a new desktop session. Restart Desktop to reload hooks for existing sessions. Start the ADP daemon with `node dist/cli.js start -b` before running a task. Automatic summaries use the matching CLI and home described above; the silence-timeout limitation also applies to Desktop.
 
 The bundled plugin is another option when the installed `agent-discord-presence` command is on Desktop's PATH. Install it into the same home using the matching CLI and restart Desktop. Avoid installing both methods together.
 
-This confirms the installed Desktop's loading code and payload compatibility. The real-host smoke script also passed against its bundled `resources/runtime/cli/dim.exe` (CLI 0.5.20): plugin installation, Working/Idle transitions and a manual summary. That exercises the bundled CLI rather than the Electron GUI; live GUI/Discord verification is still outstanding.
+This confirms the installed Desktop's loading code and payload compatibility. The real-host smoke script also passed against its bundled `resources/runtime/cli/dim.exe` (CLI 0.5.20): plugin installation, Working/Idle transitions, automatic summaries using the exported session model, and manual summaries. That exercises the bundled CLI rather than the Electron GUI; live GUI/Discord verification is still outstanding.
 
 ### OpenCode
 
@@ -516,7 +539,7 @@ Command hooks are short-lived and do not provide a trustworthy host PID, so Code
 | `--stale-minutes` | Hook inactivity timeout, 1–1440 minutes |
 | `--dry-run` | Print activity JSON instead of connecting to Discord |
 
-The runtime has no production npm dependencies. Unix uses a per-user directory and a mode-0600 socket; Windows uses a named pipe. These interfaces are for trusted local processes. Do not expose them directly to the network. The transport tests use Unix sockets on macOS/Linux and named pipes on Windows. The full 45-test suite has passed on Windows x64 with Node 24.13.0, including daemon startup, background mode and shutdown. The Codex/Claude absolute-path hook generator targets POSIX shells; use their bundled PATH-based hooks on Windows. DimAgent configuration generation supports Windows cmd.exe and POSIX shells.
+The runtime has no production npm dependencies. Unix uses a per-user directory and a mode-0600 socket; Windows uses a named pipe. These interfaces are for trusted local processes. Do not expose them directly to the network. The transport tests use Unix sockets on macOS/Linux and named pipes on Windows. The full 51-test suite has passed on Windows x64 with Node 24.13.0, including daemon startup, background mode and shutdown. The Codex/Claude absolute-path hook generator targets POSIX shells; use their bundled PATH-based hooks on Windows. DimAgent configuration generation supports Windows cmd.exe and POSIX shells.
 
 SSH, containers, and remote agent services cannot reach the desktop Discord socket automatically. Run the daemon on the desktop and arrange an explicit local socket forwarding mechanism before using remote adapters. That forwarding is outside this first version.
 
@@ -542,7 +565,7 @@ npm pack --dry-run
 
 Tests cover multi-session arbitration, stale events and leases, protocol validation/privacy, CLI hooks through the real service socket, adapter lifecycle contracts, and a fake Discord server (fragmentation, PING/PONG, acknowledgements, coalescing, reconnection and clearing). Contract tests do not replace live validation inside each agent version.
 
-Run integration tests in an environment that permits local socket listening and connections. The current 45 tests pass on Node 24.13.0 on Windows x64, including background startup and graceful shutdown through the CLI. The original transport checks were also verified on Node 26.8.2 on macOS. Live Discord returned the requested custom summary title and acknowledged clearing the activity. A repeatable live check is available (it briefly changes your activity and then clears it):
+Run integration tests in an environment that permits local socket listening and connections. The current 51 tests pass on Node 24.13.0 on Windows x64, including background startup and graceful shutdown through the CLI. The original transport checks were also verified on Node 26.8.2 on macOS. Live Discord returned the requested custom summary title and acknowledged clearing the activity. A repeatable live check is available (it briefly changes your activity and then clears it):
 
 ```sh
 node scripts/smoke-discord.mjs

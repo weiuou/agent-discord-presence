@@ -11,9 +11,10 @@ import {loadSettings, resolveSettings} from './settings.js';
 import {buildPresencePrompt} from './prompts.js';
 import {boundedResponse} from './completion.js';
 import {nativeSummarySettings, type NativeSummaryJob} from './native-summary.js';
+import {DimagentCompletion, type DimagentRead} from './dimagent.js';
 export interface Transport {status: string; readonly acknowledged?: boolean; start(): void; setActivity(activity: Activity | null): void; stop(): void}
 export async function startDaemon(options: {clientId?: string; dryRun?: boolean; path?: string; staleMs?: number;
-  transport?: Transport; log?: (message: string) => void; generate?: Generate; generationTimeoutMs?: number} = {}) {
+  transport?: Transport; log?: (message: string) => void; generate?: Generate; generationTimeoutMs?: number; dimagentRead?: DimagentRead} = {}) {
   const path = options.path ?? socketPath();
   const log = options.log ?? console.log;
   const clientId = options.clientId ?? DISCORD_CLIENT_ID;
@@ -58,11 +59,17 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
     if (!settings.enabled) throw new Error('Summary generation disabled');
     return generateSummary(settings, agent, response, signal, context);
   }), () => transport.setActivity(currentActivity()), options.generationTimeoutMs);
+  const completion = new DimagentCompletion(store, () => (!options.dryRun || !!options.generate) && resolveSettings(settings, 'dimagent').enabled,
+    (key, reply) => {
+      const session = store.sessions.get(key)!;
+      session.model = reply.model ?? session.model; session.provider = reply.provider ?? session.provider;
+      generation.submit(key, reply.response);
+    }, options.dimagentRead);
   function currentActivity() {
     const session = store.select();
     return activityFor(session, resolveSettings(settings, session?.agent).presence);
   }
-  function refresh() { reloadSettings(); store.sweep(); generation.reconcile(); transport.setActivity(currentActivity()); }
+  function refresh() { reloadSettings(); store.sweep(); completion.reconcile(); generation.reconcile(); transport.setActivity(currentActivity()); }
   const server = createServer(socket => {
     socket.setEncoding('utf8');
     sockets.add(socket); socket.on('close', () => sockets.delete(socket));
@@ -97,6 +104,10 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
         else if (message.type === 'pin') store.pin(message.key);
         else if (message.type !== 'status') throw new Error('Unknown request type');
         refresh();
+        if (message.type === 'event' && message.event.agent === 'dimagent' && message.event.state === 'idle' &&
+            store.sessions.get(sessionKey(message.event))?.updatedAt === message.event.updatedAt && !message.event.heartbeat) {
+          completion.enqueue(sessionKey(message.event), message.dimagentRunId);
+        }
         let nativeSummary: NativeSummaryJob | undefined;
         if (message.type === 'event' && message.event.response) {
           const key = sessionKey(message.event);
@@ -119,6 +130,7 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
           settingsError, presence: resolveSettings(settings, store.select()?.agent).presence,
           agentSettings: Object.fromEntries([...new Set([...store.sessions.values()].map(s => s.agent))].map(agent => [agent, resolveSettings(settings, agent)])),
           generation: {...generation.status, ...settings, ...resolveSettings(settings), modelPolicy: 'override-or-session'},
+          dimagentCapture: completion.status,
           sessions: [...store.sessions.values()].map(s => ({key: sessionKey(s), state: s.state, model: s.model, provider: s.provider, startedAt: s.startedAt, updatedAt: s.updatedAt, lastSeen: s.lastSeen, summary: s.summary})),
         } : {ok: true, nativeSummary}) + '\n');
       } catch (error) { socket.end(JSON.stringify({ok: false, error: (error as Error).message}) + '\n'); }
@@ -138,7 +150,7 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
     return closing ??= (async () => {
       clearInterval(ticker); transport.stop();
       const closed = new Promise<void>(resolve => server.close(() => resolve()));
-      await generation.close();
+      await completion.close(); await generation.close();
       for (const socket of sockets) if (socket !== reply) socket.destroy();
       reply?.end(JSON.stringify({ok: true}) + '\n', () => reply.destroy());
       await closed;

@@ -8,6 +8,7 @@ import {parseSummary, type Summary} from './summary.js';
 import {boundedResponse} from './completion.js';
 import type {Agent} from './protocol.js';
 import type {SessionStore} from './store.js';
+import {runDimagent} from './dimagent.js';
 
 export interface ModelContext {model?: string; provider?: string}
 export type Generate = (agent: Agent, response: string, signal: AbortSignal, context?: ModelContext) => Promise<Summary>;
@@ -144,6 +145,13 @@ export async function generateSummary(settings: import('./settings.js').Settings
 }
 async function nativeSummary(agent: Agent, input: ReturnType<typeof buildPresencePrompt>, model: string,
   provider: string | undefined, signal: AbortSignal): Promise<unknown> {
+  if (agent === 'dimagent') {
+    const args = ['exec', '--json', '--no-hooks', '--policy', 'read-only', '--tools', '', '--model', model,
+      '--system-prompt', input.systemPrompt + '\nReturn only JSON matching this schema:\n' + JSON.stringify(input.schema), '--stdin'];
+    if (provider) args.push('--provider', provider);
+    const output = await runDimagent(args, signal, input.prompt, 1024 * 1024);
+    return dimagentSummaryValue(output);
+  }
   const directory = await mkdtemp(join(tmpdir(), 'adp-summary-'));
   try {
     let command: string; let args: string[];
@@ -180,4 +188,25 @@ async function nativeSummary(agent: Agent, input: ReturnType<typeof buildPresenc
     }
     return JSON.parse(stdout);
   } finally { await rm(directory, {recursive: true, force: true}); }
+}
+
+/** Accept only a completed tool-free auxiliary run, never partial/reasoning output. */
+export function dimagentSummaryValue(output: string): unknown {
+  let text = ''; let finished = false;
+  for (const line of output.split('\n').filter(Boolean)) {
+    const event = JSON.parse(line);
+    if (typeof event.eventType === 'string' && (event.eventType.startsWith('tool:') || event.eventType === 'permission:requested')) {
+      throw new GenerationError('Unexpected DimAgent summary tool call');
+    }
+    if (event.eventType === 'text:delta' && typeof event.payload?.delta === 'string') {
+      if (finished) throw new GenerationError('Unexpected DimAgent output after completion');
+      text += event.payload.delta;
+    }
+    if (event.eventType === 'run:ended') {
+      if (finished || event.payload?.status !== 'completed') throw new GenerationError('DimAgent summary did not complete');
+      finished = true;
+    }
+  }
+  if (!finished) throw new GenerationError('DimAgent summary ended without completion');
+  return JSON.parse(text);
 }

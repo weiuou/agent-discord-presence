@@ -1,4 +1,4 @@
-import {emit} from '../client.js';
+import {emit, request} from '../client.js';
 import type {Agent, PresenceEvent, State} from '../protocol.js';
 import {boundedResponse} from '../completion.js';
 export const hookEvents = {
@@ -32,7 +32,7 @@ export function hookEvent(agent: HookAgent, payload: Record<string, unknown>, no
   if (!state) return;
   return {version: 1, agent: agent as Agent, sessionId: payload.session_id, state, updatedAt: now,
     ...(typeof payload.model === 'string' ? {model: payload.model} : {}),
-    // DimAgent's Stop payload has no completed reply. Do not read its transcript.
+    // DimAgent sends a separate run-id hint; the daemon reads a bounded export.
     ...(name === 'Stop' && agent !== 'dimagent' ? {response: boundedResponse(payload.last_assistant_message)} : {})};
 }
 export async function runHook(agent: HookAgent): Promise<void> {
@@ -46,8 +46,12 @@ export async function runHook(agent: HookAgent): Promise<void> {
       data += chunk.toString();
       if (Buffer.byteLength(data) > 1024 * 1024) return;
     }
-    const event = hookEvent(agent, JSON.parse(data), now);
-    if (event) await emit(event);
+    const payload = JSON.parse(data);
+    const event = hookEvent(agent, payload, now);
+    if (event && agent === 'dimagent' && payload.hook_event_name === 'Stop') {
+      const runId = payload.run_id;
+      await request({type: 'event', event, ...(typeof runId === 'string' && runId.length <= 256 ? {dimagentRunId: runId} : {})});
+    } else if (event) await emit(event);
   } catch { /* Hooks are advisory and must emit no model context. */ }
   finally { clearTimeout(timer); process.stdin.destroy(); }
 }

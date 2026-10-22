@@ -29,6 +29,7 @@ const help = `agent-discord-presence
 
 Options: --agent NAME (config show/set/unset, preset apply), --client-id ID, --socket PATH, --stale-minutes N (default 30, hooks only)
 Environment: DISCORD_CLIENT_ID, AGENT_PRESENCE_SOCKET, DISCORD_IPC_PATH, ADP_CONFIG
+DimAgent summaries: ADP_DIMAGENT_COMMAND (native executable), DIMCODE_HOME (matching agent home)
 `;
 async function main() {
   const {values, positionals} = parseArgs({allowPositionals: true, options: {

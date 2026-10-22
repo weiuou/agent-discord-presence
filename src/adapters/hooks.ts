@@ -4,17 +4,26 @@ import {boundedResponse} from '../completion.js';
 export const hookEvents = {
   codex: ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PermissionRequest', 'Stop', 'Interrupt', 'SessionEnd'],
   'claude-code': ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Notification', 'Stop', 'StopFailure', 'SessionEnd'],
+  // Checked against the command-hook contract shipped in DimAgent 0.5.21.
+  dimagent: ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PermissionRequest', 'PreCompact', 'PostCompact', 'SubagentStart', 'SubagentStop', 'Stop'],
 } as const;
 export type HookAgent = keyof typeof hookEvents;
 export function hookEvent(agent: HookAgent, payload: Record<string, unknown>, now = Date.now()): PresenceEvent | undefined {
   if (typeof payload.session_id !== 'string' || !payload.session_id) return;
   const name = payload.hook_event_name;
+  if (agent === 'dimagent' && !hookEvents.dimagent.includes(name as typeof hookEvents.dimagent[number])) return;
+  // DimAgent sends child lifecycle events with the parent's session_id.
+  if (agent === 'dimagent' && (name === 'SubagentStart' || name === 'SubagentStop')) {
+    if (typeof payload.agent_id !== 'string' || !payload.agent_id || payload.agent_id === payload.session_id) return;
+    return {version: 1, agent, sessionId: payload.agent_id, state: name === 'SubagentStop' ? 'closed' : 'working', updatedAt: now};
+  }
   let state: State | undefined;
   if (name === 'SessionStart') {
     // Compaction is a continuation; it must not reset a busy session to idle.
     state = payload.source === 'compact' ? 'working' : 'idle';
   }
   if (['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure'].includes(name as string)) state = 'working';
+  if (agent === 'dimagent' && (name === 'PreCompact' || name === 'PostCompact')) state = 'working';
   if (name === 'PermissionRequest') state = 'waiting';
   if (name === 'Notification' && ['permission_prompt', 'idle_prompt', 'elicitation_dialog'].includes(payload.notification_type as string)) state = 'waiting';
   if (name === 'Stop' || name === 'Interrupt') state = 'idle';
@@ -23,7 +32,8 @@ export function hookEvent(agent: HookAgent, payload: Record<string, unknown>, no
   if (!state) return;
   return {version: 1, agent: agent as Agent, sessionId: payload.session_id, state, updatedAt: now,
     ...(typeof payload.model === 'string' ? {model: payload.model} : {}),
-    ...(name === 'Stop' ? {response: boundedResponse(payload.last_assistant_message)} : {})};
+    // DimAgent's Stop payload has no completed reply. Do not read its transcript.
+    ...(name === 'Stop' && agent !== 'dimagent' ? {response: boundedResponse(payload.last_assistant_message)} : {})};
 }
 export async function runHook(agent: HookAgent): Promise<void> {
   if (process.env.ADP_SUMMARY_WORKER === '1') return;

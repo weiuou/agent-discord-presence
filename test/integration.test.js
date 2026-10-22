@@ -1,3 +1,4 @@
+import {ipcPath} from "./ipc-path.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:net';
@@ -21,7 +22,7 @@ test('decoder handles split and concatenated frames; refuses oversized frames', 
   const bad = Buffer.alloc(8); bad.writeUInt32LE(2 ** 30, 4); assert.throws(() => decoder.feed(bad));
 });
 test('Discord handshake, activity ACK, ping, coalescing, reconnect replay, and clear', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'adp-rpc-')); const path = join(dir, 'discord.sock');
+  const dir = await mkdtemp(join(tmpdir(), 'adp-rpc-')); const path = ipcPath(dir, "discord.sock");
   const messages = []; const sockets = new Set(); let connections = 0;
   const server = createServer(socket => {
     connections++; sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('error', () => {});
@@ -53,7 +54,7 @@ test('Discord handshake, activity ACK, ping, coalescing, reconnect replay, and c
   client.stop(); await until(() => messages.some(m => m.body.args?.activity === null));
 });
 test('daemon and real CLI hooks; adapters emit events and release session resources', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'adp-daemon-')); const path = join(dir, 'presence.sock');
+  const dir = await mkdtemp(join(tmpdir(), 'adp-daemon-')); const path = ipcPath(dir, "presence.sock");
   const activity = []; const transport = {status: 'test', start() {}, stop() {}, setActivity(a) { activity.push(a); }};
   const generated = [];
   const daemon = await startDaemon({path, transport, generate: async (agent, response, _signal, context) => {
@@ -120,7 +121,7 @@ test('daemon and real CLI hooks; adapters emit events and release session resour
 });
 
 test('CLI stop cancels generation, clears transport, closes the socket, and succeeds when already stopped', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'adp-stop-')); const path = join(dir, 'presence.sock');
+  const dir = await mkdtemp(join(tmpdir(), 'adp-stop-')); const path = ipcPath(dir, "presence.sock");
   let stopped = 0; let signal;
   const activity = [];
   const daemon = await startDaemon({path,
@@ -154,7 +155,7 @@ test('CLI stop cancels generation, clears transport, closes the socket, and succ
 });
 
 test('background start releases the terminal, preserves options, reports failures, and supports stop', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'adp-background-')); const path = join(dir, 'presence.sock');
+  const dir = await mkdtemp(join(tmpdir(), 'adp-background-')); const path = ipcPath(dir, "presence.sock");
   t.after(async () => {
     try { await request({type: 'stop'}, path, 10_000); } catch {}
     await rm(dir, {recursive: true, force: true});
@@ -188,7 +189,7 @@ test('background start releases the terminal, preserves options, reports failure
 
 test('presence config hot reloads assets and preserves the last valid configuration', async t => {
   const {writeFile} = await import('node:fs/promises');
-  const dir = await mkdtemp(join(tmpdir(), 'adp-assets-')); const path = join(dir, 'presence.sock');
+  const dir = await mkdtemp(join(tmpdir(), 'adp-assets-')); const path = ipcPath(dir, "presence.sock");
   const config = join(dir, 'config.json'); const oldConfig = process.env.ADP_CONFIG;
   process.env.ADP_CONFIG = config;
   const activity = [];

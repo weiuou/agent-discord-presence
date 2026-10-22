@@ -1,0 +1,6 @@
+{
+  "name": "agent-discord-presence",
+  "version": "0.0.3",
+  "hooks": "hooks/hooks.json",
+  "description": "Show DimAgent activity in Discord through the local ADP service."
+}

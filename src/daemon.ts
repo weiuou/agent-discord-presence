@@ -126,7 +126,8 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
   });
   server.maxConnections = 64;
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject); server.listen(path, () => { server.removeListener('error', reject); resolve(); });
+    const failed = (error: NodeJS.ErrnoException) => reject(error.code === 'EADDRINUSE' ? new Error('Presence service is already running') : error);
+    server.once('error', failed); server.listen(path, () => { server.removeListener('error', failed); resolve(); });
   });
   if (process.platform !== 'win32') await chmod(path, 0o600);
   server.on('error', error => log(`Presence service: ${error.message}`));

@@ -1,6 +1,8 @@
 # Agent Discord Presence
 
-Discord Rich Presence for Codex, Claude Code, OpenCode, Pi, and DeepSeek Harness, powered by one local service that keeps your active work visible in Discord.
+Discord Rich Presence for Codex, Claude Code, OpenCode, Pi, DeepSeek Harness, and DimAgent, powered by one local service that keeps your active work visible in Discord.
+
+DimAgent support in this branch uses the public CLI's command hooks (verified with 0.5.21). It provides lifecycle presence and manual summaries; automatic reply summaries are unavailable with that host's current hook payload. This adapter is not included in the upstream npm 0.0.3 release; see [DimAgent setup from source](USAGE.md#dimagent).
 
 > [!NOTE]\
 > This project is in early development, so expect frequent changes.
@@ -44,6 +46,7 @@ Then follow the setup instructions for your agent:
 - [OpenCode](USAGE.md#opencode)
 - [Pi](USAGE.md#pi)
 - [DeepSeek Harness](USAGE.md#deepseek-harness)
+- [DimAgent](USAGE.md#dimagent)
 
 Once connected, give your agent a task and check Discord for its activity. Run `adp status` to check the service and Discord connection.
 

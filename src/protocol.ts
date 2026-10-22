@@ -1,4 +1,4 @@
-export const agents = ['codex', 'claude-code', 'opencode', 'pi', 'deepseek-harness'] as const;
+export const agents = ['codex', 'claude-code', 'opencode', 'pi', 'deepseek-harness', 'dimagent'] as const;
 export type Agent = typeof agents[number];
 export type State = 'idle' | 'working' | 'waiting' | 'error' | 'closed';
 export interface PresenceEvent {
@@ -18,7 +18,7 @@ export interface PresenceEvent {
 }
 export const labels: Record<Agent, string> = {
   codex: 'Codex', 'claude-code': 'Claude Code', opencode: 'OpenCode',
-  pi: 'Pi', 'deepseek-harness': 'DeepSeek Harness',
+  pi: 'Pi', 'deepseek-harness': 'DeepSeek Harness', dimagent: 'DimAgent',
 };
 export function parseEvent(value: unknown, now = Date.now()): PresenceEvent {
   if (!value || typeof value !== 'object') throw new Error('Expected event object');

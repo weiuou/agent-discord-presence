@@ -64,7 +64,7 @@ Ctrl+C in a foreground service terminal also closes it and clears its activity. 
 
 ## Independent configuration for each agent
 
-One daemon accepts Codex, Claude Code, OpenCode, Pi, and DeepSeek Harness sessions concurrently. Install each client's hook/plugin once; incoming events automatically select that agent's settings. Discord shows one selected session at a time, using the existing activity priority and pinning rules.
+One daemon accepts Codex, Claude Code, OpenCode, Pi, DeepSeek Harness, and DimAgent sessions concurrently. Install each client's hook/plugin once; incoming events automatically select that agent's settings. Discord shows one selected session at a time, using the existing activity priority and pinning rules.
 
 Configuration resolves built-in defaults, shared presets, per-agent presets, explicit shared settings, and explicit `agents` overrides, in that precedence order. Existing flat configuration remains valid. Use `--agent` to change just one client:
 
@@ -80,7 +80,7 @@ adp config set provider '' --agent deepseek-harness
 adp config set customPrompt '用中文描述当前工作。' --agent deepseek-harness
 ```
 
-With `service: session` and empty model/provider overrides, each client uses its own session model. Harness also reuses its in-process provider credentials. You can independently configure `enabled`, `service`, `model`, `provider`, `baseUrl`, `apiKeyEnv`, `customPrompt`, `maxLength`, and all `presence` fields. `enabled` controls automatic summaries, not lifecycle reporting.
+For adapters that supply completed replies, `service: session` with empty model/provider overrides uses the session model. DimAgent currently supplies lifecycle events only (see its setup section). Harness also reuses its in-process provider credentials. You can independently configure `enabled`, `service`, `model`, `provider`, `baseUrl`, `apiKeyEnv`, `customPrompt`, `maxLength`, and all `presence` fields. `enabled` controls automatic summaries, not lifecycle reporting.
 
 Inspect effective settings or remove an override:
 
@@ -158,13 +158,13 @@ Use `config unset KEY` (optionally with `--agent`) to remove a manual override a
 
 Existing configuration fields remain explicit overrides. Values written by older versions of `preset apply` also remain explicit because their origin was not recorded; unset any such fields you want the new preset selection to control.
 
-The bundled presets are `default`, `minimal`, `playful`, `codex`, `claude-code`, `opencode`, `pi`, and `deepseek-harness`. Each agent automatically gets its matching preset’s large image and hover label. These image defaults sit below explicit global settings and per-agent overrides; preset prompt/model fields are not applied automatically. Use `adp preset apply deepseek-harness --agent deepseek-harness` to select an agent’s image preset. Icon assets come from [Lobe Icons](https://github.com/lobehub/lobe-icons), pinned to version 1.97.0. To add bundled presets when developing from source, edit `presets.json`; the file is included in the npm package. For persistent personal settings, use `adp config set`. Existing string-valued prompt presets must be converted to objects such as `{"customPrompt": "..."}`. `adp prompt NAME` still previews only the prompt-related fields, without applying the preset. Saved presentation settings update in the running service without a restart; model settings affect new summary jobs.
+The bundled presets are `default`, `minimal`, `playful`, `codex`, `claude-code`, `opencode`, `pi`, `deepseek-harness`, and `dimagent`. Each agent automatically gets its matching preset’s large image and hover label. These image defaults sit below explicit global settings and per-agent overrides; preset prompt/model fields are not applied automatically. Use `adp preset apply deepseek-harness --agent deepseek-harness` to select an agent’s image preset. The DimAgent icon uses its official website favicon. Other icon assets come from [Lobe Icons](https://github.com/lobehub/lobe-icons), pinned to version 1.97.0. To add bundled presets when developing from source, edit `presets.json`; the file is included in the npm package. For persistent personal settings, use `adp config set`. Existing string-valued prompt presets must be converted to objects such as `{"customPrompt": "..."}`. `adp prompt NAME` still previews only the prompt-related fields, without applying the preset. Saved presentation settings update in the running service without a restart; model settings affect new summary jobs.
 
 ## Default presence prompts
 
 The package includes a default activity-writing prompt in [`prompts/presence.md`](prompts/presence.md), editable preferences in [`prompts/default.json`](prompts/default.json), and configuration presets in [`presets.json`](presets.json).
 
-Automatic summaries are enabled by default. After a completed reply, the adapter sends at most 4,000 Unicode characters of assistant text to the local service. A background worker uses this prompt to generate the activity title and subtitle. It never reads transcript files. These prompts generate activity text, not full plugin settings such as images, buttons, or timers.
+Automatic summaries are enabled by default for adapters that supply completed replies. DimAgent 0.5.21 does not include replies in its command hooks and supports manual summaries only. After a completed reply, the adapter sends at most 4,000 Unicode characters of assistant text to the local service. A background worker uses this prompt to generate the activity title and subtitle. It never reads transcript files. These prompts generate activity text, not full plugin settings such as images, buttons, or timers.
 
 Print the complete system prompt, configuration, and JSON output schema:
 
@@ -207,6 +207,7 @@ Default behavior is `service: "session"` with an empty `model` override. The wor
 | Pi | Assistant text blocks, submitted at `agent_settled`; model/provider from context | `pi --print`, no tools/extensions/skills or saved session |
 | OpenCode | Assistant message text parts, submitted at idle; model/provider from message metadata | `opencode run`, all tool permissions denied; summary runs appear in OpenCode session history |
 | DeepSeek Harness | Completed assistant text, submitted at actual idle; model/provider from message source | In-process `ctx.llm.stream`, reusing Harness provider credentials; no tools or conversation history |
+| DimAgent | No completed reply in the public command-hook payload | Not available; use manual summaries |
 
 For CLI-based adapters, the native CLI must be available to the service and already authenticated. Current CLI flags are required; in particular Claude Code must support `--safe-mode`. Model definitions or credentials available only inside an agent's project may not be available in the worker's temporary working directory. Codex workers skip the user config to avoid inheriting unrelated MCP integrations; custom Codex model-provider definitions should use the explicit API service below. This follows the session model ID, not its reasoning effort or the entire original conversation.
 
@@ -343,7 +344,7 @@ Model integrations can import `summaryTarget` and `publishSummary` from `agent-d
 
 ## Connect your agents
 
-Start the shared service before using any adapter. Use one installation method per agent to avoid duplicate hooks. The `config codex|claude-code|opencode|pi` commands only print adapter configuration; `config set` saves this plugin’s summary settings. Generated configuration uses absolute paths to the installed package and, for hooks, the Node.js executable. Regenerate it if either location changes, such as after switching Node.js installations.
+Start the shared service before using any adapter. Use one installation method per agent to avoid duplicate hooks. The `config codex|claude-code|dimagent|opencode|pi` commands only print adapter configuration; `config set` saves this plugin’s summary settings. Generated configuration uses absolute paths to the installed package and, for hooks, the Node.js executable. Regenerate it if either location changes, such as after switching Node.js installations.
 
 ### Codex
 
@@ -370,6 +371,61 @@ Alternatively, after the global npm installation above, load the bundled plugin 
 ```sh
 claude --plugin-dir "$(npm root --global)/agent-discord-presence/plugins/claude-code/agent-discord-presence"
 ```
+
+### DimAgent
+
+This adapter targets the public DimAgent CLI command-hook API, checked against `dimcode` / `dimagent` 0.5.21. It does not assume that DimAgent exposes the Harness Cordis events or a rutis service contract. The public [CLI documentation](https://dimagent.cn/docs/cli) describes command hooks and plugin installation; the precise payload was checked in the published 0.5.21 binary's bundled `agent/src/hooks/command/config.ts` and `protocol.ts`.
+
+The upstream npm 0.0.3 package does not contain this adapter. From a checkout of a revision containing it, install the built CLI on PATH:
+
+```sh
+npm ci
+npm run build
+npm install --global .
+adp start -b
+dim plugin install "/absolute/path/to/agent-discord-presence/plugins/dimagent/agent-discord-presence"
+```
+
+Replace the path with this checkout's plugin directory. The bundled `.codex-plugin/plugin.json` explicitly declares `hooks/hooks.json`; its commands use `agent-discord-presence hook dimagent` from PATH. Restart DimAgent after installation. These commands use the `dim` entry point; use `dimagent` if that is your installed CLI name. Plugin installation is local and does not register a marketplace.
+
+Alternatively, print configuration with absolute paths to the current Node executable and ADP checkout:
+
+```sh
+adp config dimagent
+```
+
+Merge the printed `hooks` entries into the DimAgent home directory's `hooks.json`, preserving existing entries. For the `dim` edition this defaults to `~/.dimcode/v2/hooks.json`; the international edition uses `~/.dim/v2/hooks.json`. `DIMCODE_HOME` overrides the home directory. The project file is `.dimcode/hooks.json` for `dim` (international edition: `.dimglobal/hooks.json`). Configuration generation works on Windows and POSIX; save the JSON as UTF-8. Install either the plugin or the generated hooks once to avoid duplicate events.
+
+`dim hooks list --json` reviews user/project hooks. In 0.5.21 it does not enumerate plugin hooks, so an empty list alone does not mean a plugin failed to load. Run a task and check `adp status` for a `dimagent:SESSION_ID` entry to verify either installation method.
+
+| Host event | Presence |
+| --- | --- |
+| `SessionStart` | Idle |
+| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact` | Working |
+| `PermissionRequest` | Waiting; a later tool or turn event resumes activity |
+| `Stop` | Idle |
+| `SubagentStart` / `SubagentStop` | Start / close the child identified by `agent_id`, keeping the parent independent |
+
+The command-hook API has no `SessionEnd`, `Interrupt`, `StopFailure`, or `PostToolUseFailure` event. Exit, cancellation, and errors therefore have no distinct reliable event mapping. Sessions expire after the hook silence timeout (default 30 minutes, configurable with `start --stale-minutes N`), including idle sessions left after exiting the CLI. A denied permission may remain Waiting until the next lifecycle event or timeout. `Stop` is advisory: another hook can request continuation, causing transient Idle until another activity event arrives.
+
+The current `Stop` payload has no completed assistant reply. This adapter never reads transcripts or invokes a summary model, even when automatic summaries are enabled globally. It forwards the model name only when the host supplies it (the tested one-shot host supplied no model name). Use a manual public summary or display override:
+
+```sh
+adp status
+adp summary 'dimagent:SESSION_ID' 'Adapting Discord presence' 'Checking lifecycle hooks'
+adp config set presence.name 'Coding with DimAgent' --agent dimagent
+```
+
+Prompts, transcript paths, working directories, tool arguments and tool results are not sent to the daemon. Hooks emit no output and tolerate a stopped daemon. The summary-worker recursion guard also applies to DimAgent hooks.
+
+The real-host smoke check installs the plugin into a temporary DimAgent home, calls a local fake model, checks Working/Idle and manual summaries through the real daemon, and uses a fake Discord transport. It neither needs provider credentials nor changes Discord activity:
+
+```sh
+npm run build
+node scripts/smoke-dimagent.mjs /absolute/path/to/dim
+```
+
+Verified on Windows x64 with DimAgent 0.5.21 and Node 24.13.0. Approval, subagent ID mapping, expiry, malformed input, privacy and offline behavior are additionally covered by contract/integration tests. Live Discord rendering and interactive TUI approvals have not been tested for this adapter.
 
 ### OpenCode
 
@@ -444,7 +500,7 @@ Command hooks are short-lived and do not provide a trustworthy host PID, so Code
 | `--stale-minutes` | Hook inactivity timeout, 1–1440 minutes |
 | `--dry-run` | Print activity JSON instead of connecting to Discord |
 
-The runtime has no production npm dependencies. Unix uses a per-user directory and a mode-0600 socket; Windows uses a named pipe. These interfaces are for trusted local processes. Do not expose them directly to the network. macOS/Linux socket transport is covered by automated tests; Windows pipe support needs testing on Windows. The absolute-path hook generator currently targets POSIX shells; use the bundled PATH-based hooks on Windows.
+The runtime has no production npm dependencies. Unix uses a per-user directory and a mode-0600 socket; Windows uses a named pipe. These interfaces are for trusted local processes. Do not expose them directly to the network. The transport tests use Unix sockets on macOS/Linux and named pipes on Windows. The full 45-test suite has passed on Windows x64 with Node 24.13.0, including daemon startup, background mode and shutdown. The Codex/Claude absolute-path hook generator targets POSIX shells; use their bundled PATH-based hooks on Windows. DimAgent configuration generation supports Windows cmd.exe and POSIX shells.
 
 SSH, containers, and remote agent services cannot reach the desktop Discord socket automatically. Run the daemon on the desktop and arrange an explicit local socket forwarding mechanism before using remote adapters. That forwarding is outside this first version.
 
@@ -470,7 +526,7 @@ npm pack --dry-run
 
 Tests cover multi-session arbitration, stale events and leases, protocol validation/privacy, CLI hooks through the real service socket, adapter lifecycle contracts, and a fake Discord server (fragmentation, PING/PONG, acknowledgements, coalescing, reconnection and clearing). Contract tests do not replace live validation inside each agent version.
 
-Run integration tests in an environment that permits local socket listening and connections. The 27 tests pass on Node 26.8.2 on macOS, including background startup and graceful shutdown through the CLI. Live Discord returned the requested custom summary title and acknowledged clearing the activity. A repeatable live check is available (it briefly changes your activity and then clears it):
+Run integration tests in an environment that permits local socket listening and connections. The current 45 tests pass on Node 24.13.0 on Windows x64, including background startup and graceful shutdown through the CLI. The original transport checks were also verified on Node 26.8.2 on macOS. Live Discord returned the requested custom summary title and acknowledged clearing the activity. A repeatable live check is available (it briefly changes your activity and then clears it):
 
 ```sh
 node scripts/smoke-discord.mjs

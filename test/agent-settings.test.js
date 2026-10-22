@@ -36,6 +36,8 @@ test('CLI scoped set/unset/show and presets preserve other agents and global def
   const cli = (...args) => JSON.parse(execFileSync(process.execPath, ['dist/cli.js', ...args], {encoding: 'utf8', env: {...process.env, ADP_CONFIG: path}, stdio: ['ignore', 'pipe', 'pipe']}));
   assert.equal(cli('config', 'set', 'enabled', 'false', '--agent', 'codex').enabled, false);
   assert.equal(cli('config', 'set', 'liveSummaries', 'false', '--agent', 'dimagent').liveSummaries, false);
+  assert.equal(cli('config', 'set', 'idleMinutes', '5', '--agent', 'dimagent').idleMinutes, 5);
+  assert.equal(cli('config', 'show', '--agent', 'codex').idleMinutes, 0);
   assert.equal(cli('config', 'show', '--agent', 'codex').liveSummaries, true);
   cli('config', 'set', 'maxLength', '60', '--agent', 'codex');
   cli('config', 'set', 'presence.assets.large_image', 'codex', '--agent', 'codex');
@@ -49,8 +51,27 @@ test('CLI scoped set/unset/show and presets preserve other agents and global def
   assert.equal(JSON.parse(saved).agents.codex.maxLength, 60);
   assert.throws(() => cli('config', 'set', 'maxLength', 'bad', '--agent', 'codex'));
   assert.throws(() => cli('config', 'set', 'liveSummaries', 'invalid', '--agent', 'dimagent'));
+  for (const value of ['-1', '0.5', '1441', 'bad']) assert.throws(() => cli('config', 'set', 'idleMinutes', value, '--agent', 'dimagent'));
   assert.throws(() => cli('config', 'show', '--agent', 'unknown'));
   assert.equal(await readFile(path, 'utf8'), saved);
+});
+
+test('daemon hot reloads scoped idle retention without shortening working or waiting sessions', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'adp-idle-')); const old = process.env.ADP_CONFIG;
+  const config = join(dir, 'config.json'); process.env.ADP_CONFIG = config;
+  await writeFile(config, '{"enabled":false}');
+  const path = ipcPath(dir);
+  const daemon = await startDaemon({path, transport: {status: 'test', start() {}, stop() {}, setActivity() {}}});
+  t.after(async () => { await daemon.close(); if (old === undefined) delete process.env.ADP_CONFIG; else process.env.ADP_CONFIG = old; await rm(dir, {recursive: true, force: true}); });
+  const at = Date.now() - 6 * 60_000;
+  for (const [id, state, agent] of [['done', 'idle', 'dimagent'], ['busy', 'working', 'dimagent'], ['approval', 'waiting', 'dimagent'], ['other', 'idle', 'codex']]) {
+    daemon.store.update({version: 1, agent, sessionId: id, state, updatedAt: at}, at);
+  }
+  assert.equal((await request({type: 'status'}, path)).sessions.length, 4);
+  await writeFile(config, JSON.stringify({enabled: false, agents: {dimagent: {idleMinutes: 5}}}));
+  const status = await request({type: 'status'}, path);
+  assert.equal(status.settingsError, null);
+  assert.deepEqual(status.sessions.map(s => s.key).sort(), ['codex:other', 'dimagent:approval', 'dimagent:busy']);
 });
 test('simultaneous Codex and Harness sessions select their own model, service, prompt and presentation', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'adp-multi-'));

@@ -39,15 +39,18 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
     try {
       const next = loadSettings();
       for (const session of store.sessions.values()) {
-        const {presence: _beforePresence, ...before} = resolveSettings(settings, session.agent);
-        const {presence: _afterPresence, ...after} = resolveSettings(next, session.agent);
+        const {presence: _beforePresence, idleMinutes: _beforeIdle, ...before} = resolveSettings(settings, session.agent);
+        const {presence: _afterPresence, idleMinutes: _afterIdle, ...after} = resolveSettings(next, session.agent);
         if (JSON.stringify(before) !== JSON.stringify(after)) session.generationRevision++;
       }
       settings = next; settingsError = null;
     }
     catch { settingsError = 'Invalid settings file; keeping the last valid configuration'; }
   }
-  const store = new SessionStore(options.staleMs);
+  const store = new SessionStore(options.staleMs, undefined, session => {
+    const minutes = resolveSettings(settings, session.agent).idleMinutes;
+    return minutes > 0 ? minutes * 60_000 : undefined;
+  });
   let lastDry: string | undefined;
   const transport: Transport = options.transport ?? (options.dryRun ? {
     status: 'dry-run', start() {}, stop() {}, setActivity(activity) {

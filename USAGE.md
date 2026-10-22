@@ -222,6 +222,7 @@ adp config set maxLength 72
 adp config set model ''             # follow the current session model
 adp config set enabled false        # stop scheduling new summaries
 adp config set enabled true
+adp config set idleMinutes 5 --agent dimagent  # hide idle hook sessions after five minutes
 ```
 
 Settings are saved to `~/.config/agent-discord-presence/config.json`, respecting `XDG_CONFIG_HOME`, or `ADP_CONFIG` when set. New generation jobs read updated settings without restarting the daemon. Already-running jobs may finish using their previous settings. The default prompt is English; the conversation language does not automatically select the summary language. Lifecycle labels such as Working remain English; DimAgent's live tool/approval templates are Chinese in this version. The `liveSummaries` boolean (default true) currently applies only to DimAgent.
@@ -529,6 +530,8 @@ adp unpin
 Copy an exact session key from `status`. Working/waiting sessions rank above errors, then idle sessions. Within a rank, the most recently updated session wins. Heartbeats do not change that ordering. Elapsed time measures the observed session lifetime, including idle time, rather than billable agent execution time.
 
 OpenCode, Pi, and DeepSeek Harness adapters send a heartbeat every 20 seconds with their host PID. The service removes their sessions after 90 seconds without a heartbeat or when that process exits. OpenCode disposal, Pi shutdown, and Harness plugin unload stop their timers. A daemon restart recovers extension sessions on the next heartbeat.
+
+`idleMinutes` optionally shortens the display time for idle command-hook sessions. Set `adp config set idleMinutes 5 --agent dimagent` to hide completed DimAgent sessions five minutes after the last hook; new tasks automatically restore presence. Working/waiting sessions keep the normal `--stale-minutes` timeout. The default `idleMinutes: 0` uses the normal timeout for idle too. Positive values must be whole minutes from 1 to 1440, remain capped by the normal timeout, and hot reload without restarting. Summary updates do not extend the idle deadline; hiding does not close the agent conversation. Extension sessions with PID/heartbeat leases retain their separate lifecycle.
 
 Command hooks are short-lived and do not provide a trustworthy host PID, so Codex and Claude Code use lifecycle end events plus a 30-minute silence timeout. Change it with `start --stale-minutes 60`. A long silent model request can exceed that timeout; increase it for long-running work. Hooks resume reporting on the next lifecycle event after a daemon restart. Focus changes are not tracked.
 

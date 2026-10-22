@@ -6,7 +6,8 @@ export class SessionStore {
   readonly sessions = new Map<string, Session>();
   private readonly ended = new Map<string, number>();
   pinned: string | null = null;
-  constructor(readonly staleMs = 30 * 60_000, private readonly alive = processAlive) {}
+  constructor(readonly staleMs = 30 * 60_000, private readonly alive = processAlive,
+    private readonly idleMs: (session: Session) => number | undefined = () => undefined) {}
   update(value: unknown, now = Date.now()): void {
     const e = parseEvent(value, now);
     const key = sessionKey(e);
@@ -27,7 +28,8 @@ export class SessionStore {
   }
   sweep(now = Date.now()): void {
     for (const [key, s] of this.sessions) {
-      const expired = now - s.lastSeen > (s.pid ? 90_000 : this.staleMs);
+      const timeout = s.pid ? 90_000 : s.state === 'idle' ? Math.min(this.staleMs, this.idleMs(s) ?? this.staleMs) : this.staleMs;
+      const expired = now - s.lastSeen > timeout;
       if (expired || (s.pid && !this.alive(s.pid))) {
         this.sessions.delete(key);
         this.ended.set(key, s.updatedAt);

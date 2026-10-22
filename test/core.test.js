@@ -39,6 +39,23 @@ test('extension leases and hook expiry clear stale presence; process death clear
   assert.equal(store.select().sessionId, 'hook');
   store.sweep(302_000); assert.equal(store.select(), undefined);
 });
+
+test('idle retention expires only configured idle hooks, clears pins and resumes on a new task', () => {
+  const store = new SessionStore(30 * 60_000, undefined, s => s.agent === 'dimagent' ? 5 * 60_000 : undefined);
+  const dim = (id, state, at) => ({...e(id, state, at), agent: 'dimagent'});
+  store.update(dim('done', 'working', 1000), 1000);
+  store.update(dim('done', 'idle', 100_000), 100_000);
+  store.update(dim('busy', 'working', 1000), 1000);
+  store.update(dim('approval', 'waiting', 1000), 1000);
+  store.update(e('other-agent', 'idle'), 1000);
+  store.setSummary('dimagent:done', {topic: 'Completed task', subtitle: ''}, 100_000, 1000);
+  store.pin('dimagent:done');
+  store.sweep(400_000); assert.equal(store.sessions.has('dimagent:done'), true);
+  store.sweep(400_001); assert.equal(store.sessions.has('dimagent:done'), false); assert.equal(store.pinned, null);
+  for (const key of ['dimagent:busy', 'dimagent:approval', 'codex:other-agent']) assert.equal(store.sessions.has(key), true);
+  store.update(dim('done', 'idle', 99_000), 400_002); assert.equal(store.sessions.has('dimagent:done'), false);
+  store.update(dim('done', 'working', 400_003), 400_003); assert.equal(store.sessions.get('dimagent:done').startedAt, 400_003);
+});
 test('protocol whitelists fields and rejects bad data', () => {
   const parsed = parseEvent(e('a', 'idle', 1000, {prompt: 'secret', cwd: '/secret'}), 1000);
   assert.equal('prompt' in parsed, false); assert.equal('cwd' in parsed, false);

@@ -2,8 +2,6 @@
 
 Discord Rich Presence for Codex, Claude Code, OpenCode, Pi, DeepSeek Harness, and DimAgent, powered by one local service that keeps your active work visible in Discord.
 
-DimAgent support in this branch uses the public CLI's command hooks and bounded local session exports (verified with CLI 0.5.20/0.5.21). It generates a title when a task starts, updates progress using fixed tool/approval phases, and summarizes the final reply when it ends. Model calls use the session's model route, or a configured OpenAI-compatible service. This adapter is not included in the upstream npm 0.0.3 release; see [DimAgent setup from source](USAGE.md#dimagent).
-
 > [!NOTE]\
 > This project is in early development, so expect frequent changes.
 

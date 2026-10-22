@@ -1,6 +1,6 @@
 # Agent Discord Presence
 
-Discord Rich Presence for Codex, Claude Code, OpenCode, Pi, DeepSeek Harness, and DimAgent, powered by one local service that keeps your active work visible in Discord.
+Discord Rich Presence for Codex, Claude Code, OpenCode, Pi, and DeepSeek Harness, powered by one local service that keeps your active work visible in Discord.
 
 > [!NOTE]\
 > This project is in early development, so expect frequent changes.

@@ -14,9 +14,9 @@ const help = `agent-discord-presence
   status                    Show connection and sessions as JSON
   pin AGENT:SESSION_ID      Select one session
   unpin                     Resume automatic selection
-  config codex|claude-code  Print hook JSON using this checkout's CLI
+  config codex|claude-code|dimagent  Print hook JSON using this checkout's CLI
   config opencode|pi        Print a local plugin/extension entry file
-  hook codex|claude-code    Receive a lifecycle hook on stdin
+  hook codex|claude-code|dimagent    Receive a lifecycle hook on stdin
   prompt [PRESET]           Print the default prompt, preferences, and output schema
   preset list              List available configuration presets
   preset show NAME...      Preview presets; later names take precedence
@@ -76,7 +76,7 @@ async function main() {
     return;
   }
   if (command === 'hook') {
-    if (argument === 'codex' || argument === 'claude-code') await runHook(argument);
+    if (argument === 'codex' || argument === 'claude-code' || argument === 'dimagent') await runHook(argument);
     return;
   }
   if (command === 'config') {
@@ -98,7 +98,7 @@ async function main() {
       console.log(JSON.stringify({path: settingsPath(), ...(agent ? {agent, ...resolveSettings(config, agent), overrides: config.agents?.[agent] ?? {}} : {...config, ...resolveSettings(config)})}, null, 2));
       return;
     }
-    if (argument === 'codex' || argument === 'claude-code') {
+    if (argument === 'codex' || argument === 'claude-code' || argument === 'dimagent') {
       if (process.platform === 'win32') throw new Error('On Windows, install the CLI on PATH and use the bundled plugin hooks');
       const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
       const cli = `${quote(process.execPath)} ${quote(fileURLToPath(import.meta.url))}`;
@@ -106,7 +106,7 @@ async function main() {
     } else if (argument === 'opencode' || argument === 'pi') {
       const path = new URL(`./adapters/${argument}.js`, import.meta.url).href;
       console.log(argument === 'pi' ? `export { default } from ${JSON.stringify(path)};` : `export { AgentPresence } from ${JSON.stringify(path)};`);
-    } else throw new Error('Choose codex, claude-code, opencode, or pi');
+    } else throw new Error('Choose codex, claude-code, dimagent, opencode, or pi');
     return;
   }
   if (command === 'start') {

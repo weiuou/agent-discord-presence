@@ -1,12 +1,15 @@
 import {emit} from '../client.js';
 import type {Agent, PresenceEvent, State} from '../protocol.js';
 import {boundedResponse} from '../completion.js';
+import {dimagentHookEvent, dimagentHookEvents} from './dimagent.js';
 export const hookEvents = {
   codex: ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PermissionRequest', 'Stop', 'Interrupt', 'SessionEnd'],
   'claude-code': ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Notification', 'Stop', 'StopFailure', 'SessionEnd'],
+  dimagent: dimagentHookEvents,
 } as const;
 export type HookAgent = keyof typeof hookEvents;
 export function hookEvent(agent: HookAgent, payload: Record<string, unknown>, now = Date.now()): PresenceEvent | undefined {
+  if (agent === 'dimagent') return dimagentHookEvent(payload, now);
   if (typeof payload.session_id !== 'string' || !payload.session_id) return;
   const name = payload.hook_event_name;
   let state: State | undefined;

@@ -44,6 +44,7 @@ Then follow the setup instructions for your agent:
 - [OpenCode](USAGE.md#opencode)
 - [Pi](USAGE.md#pi)
 - [DeepSeek Harness](USAGE.md#deepseek-harness)
+- [DimAgent](USAGE.md#dimagent)
 
 Once connected, give your agent a task and check Discord for its activity. Run `adp status` to check the service and Discord connection.
 

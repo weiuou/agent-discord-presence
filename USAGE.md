@@ -371,6 +371,20 @@ Alternatively, after the global npm installation above, load the bundled plugin 
 claude --plugin-dir "$(npm root --global)/agent-discord-presence/plugins/claude-code/agent-discord-presence"
 ```
 
+### DimAgent
+
+Install the bundled plugin after installing ADP on PATH:
+
+```sh
+dim plugin install "/absolute/path/to/agent-discord-presence/plugins/dimagent/agent-discord-presence"
+```
+
+Alternatively, run `adp config dimagent` on POSIX and merge the printed `hooks` entries into `~/.dimcode/v2/hooks.json`, preserving existing hooks. Use one installation method. `DIMCODE_HOME` overrides the home directory. Restart DimAgent after installation. The bundled plugin works on Windows and with Desktop when installed in the same DimAgent home.
+
+The adapter maps the public CLI 0.5.20/0.5.21 command hooks to working, waiting and idle states, including compaction and child-agent lifecycle events. `Stop` reports idle. There is no session-end or interruption hook, so sessions use the existing silence timeout for cleanup. The `dimagent` image preset uses the official website favicon.
+
+The hook payload does not include the completed assistant reply; automatic task summaries are unavailable in this adapter. Manual summaries and display settings use the existing ADP commands.
+
 ### OpenCode
 
 ```sh

@@ -40,6 +40,14 @@
       }
     }
   },
+  "dimagent": {
+    "presence": {
+      "assets": {
+        "large_image": "https://dimagent.cn/favicon.png",
+        "large_text": "DimAgent"
+      }
+    }
+  },
   "deepseek-harness": {
     "presence": {
       "assets": {

@@ -17,6 +17,7 @@
     ".": "./dist/client.js",
     "./opencode": "./dist/adapters/opencode.js",
     "./pi": "./dist/adapters/pi.js",
+    "./dim": "./dist/adapters/dim.js",
     "./prompts": "./dist/prompts.js",
     "./presets": "./dist/presets.js",
     "./deepseek-harness": "./dist/adapters/deepseek-harness.js"

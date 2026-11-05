@@ -1,0 +1,9 @@
+{
+  "name": "agent-discord-presence",
+  "description": "Discord Rich Presence for the Rust Dim harness",
+  "code": {
+    "entry": "index.js",
+    "inject": ["partRegistry", "auxiliaryModel"],
+    "provides": {}
+  }
+}

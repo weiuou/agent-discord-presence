@@ -1,476 +1,222 @@
-# Usage guide
+# 使用指南 · weiuou fork
 
-[Back to README](README.md)
+[返回 README](README.md)
 
-- [Run the service](#install-and-run)
-- [Prompts and language](#default-presence-prompts)
-- [Automatic summaries and models](#automatic-generation-and-model-selection)
-- [Images and display settings](#images-and-display-settings)
-- [Presence layout and manual summaries](#summary-title-layout)
-- [Connect your agents](#connect-your-agents)
-- [Session selection](#session-selection-and-lifecycle)
-- [Configuration and platforms](#configuration-and-platform-notes)
-- [Development](#development)
+本文对应 [weiuou/agent-discord-presence](https://github.com/weiuou/agent-discord-presence) 的源码版本。原项目为 [LitoMore/agent-discord-presence](https://github.com/LitoMore/agent-discord-presence)；包名、CLI 命令和配置目录继续沿用，以便复用已有接入。
 
-Commands below use `adp`, the short alias for `agent-discord-presence`. To run from source, see [Development](#development).
+- [安装与升级](#install)
+- [服务管理](#service)
+- [Dim Rust α](#dim-rust-alpha)
+- [旧版 DimAgent CLI / Desktop](#dimagent-typescript)
+- [其他 Agent](#other-agents)
+- [独立配置与预设](#configuration)
+- [摘要、模型和数据流](#summaries)
+- [图标与显示](#display)
+- [会话选择与清理](#sessions)
+- [排查问题](#troubleshooting)
+- [开发与验证](#verification)
 
-## Install and run
+<a id="install"></a>
+## 安装与升级
 
-Requires Node.js 22 or newer and the Discord desktop app. Install from npm:
-
-```sh
-npm install --global agent-discord-presence
-```
-
-Start the service in a terminal (keep it running):
+需要 Git、Node.js 22+、npm，以及已登录的 Discord 桌面客户端。
 
 ```sh
-adp start
+git clone https://github.com/weiuou/agent-discord-presence.git
+cd agent-discord-presence
+npm ci
+npm run build
+npm install --global .
 ```
 
-To start in the background and continue using the same terminal:
+本文通过本 fork 的源码安装。`npm install --global agent-discord-presence` 对应 npm 注册表中的同名发布包，不能据此判断是否包含此 fork 的 Dim 适配。包内的名称、版本号和上游作者元数据也不应单独用来区分源码来源。
 
-```sh
-adp start -b
-```
+以下命令使用短别名 `adp`。不全局安装时，在源码目录把它替换为 `node dist/cli.js`。生成配置中的绝对路径会绑定当前 Node 和源码位置，移动目录或更换 Node 后需要重新生成。
 
-The command returns after the local service is listening and prints its PID and log path. Discord may still be connecting; check `adp status` for connection state. Startup failures return a nonzero exit code, including when a service is already running. The detached process continues after the terminal closes; use `adp stop` to shut it down. Background mode inherits the current environment and supports the same startup options, including `--socket` and `--dry-run`. Its output is appended to the printed log file in the per-user temporary directory.
-
-The default Application ID, `1549160807705870418`, is defined in `src/constants.ts`. You can supply another Application ID with `--client-id` or `DISCORD_CLIENT_ID`. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications) and copy its Application ID from General Information. A bot token or user token is not required. The activity explicitly sets its `name` to the session summary, independently of the application's Developer Portal name.
-
-For a preview without Discord:
-
-```sh
-adp start --dry-run
-```
-
-In another terminal, send sample lifecycle events:
-
-```sh
-printf '%s\n' '{"session_id":"demo","hook_event_name":"UserPromptSubmit"}' | adp hook codex
-adp status
-printf '%s\n' '{"session_id":"demo","hook_event_name":"SessionEnd"}' | adp hook codex
-```
-
-Stop the service from another terminal:
-
-```sh
-adp stop
-```
-
-This cancels pending summary generation, clears Discord activity, and closes the service socket. If the service is already stopped, the command reports that and succeeds. For a custom socket, use `adp stop --socket PATH` or the same `AGENT_PRESENCE_SOCKET` used to start the service.
-
-Ctrl+C in a foreground service terminal also closes it and clears its activity. Startup defaults to the foreground; use `--background` or `-b` to detach it. Background mode does not configure startup at OS login or restart after a crash. A service started with an older version must be restarted once to support the new stop command.
-
-## Independent configuration for each agent
-
-One daemon accepts Codex, Claude Code, OpenCode, Pi, and DeepSeek Harness sessions concurrently. Install each client's hook/plugin once; incoming events automatically select that agent's settings. Discord shows one selected session at a time, using the existing activity priority and pinning rules.
-
-Configuration resolves built-in defaults, shared presets, per-agent presets, explicit shared settings, and explicit `agents` overrides, in that precedence order. Existing flat configuration remains valid. Use `--agent` to change just one client:
-
-```sh
-adp config set service session --agent codex
-adp config set model '' --agent codex
-adp config set customPrompt 'Write summaries in English.' --agent codex
-adp preset apply codex --agent codex
-
-adp config set service session --agent deepseek-harness
-adp config set model '' --agent deepseek-harness
-adp config set provider '' --agent deepseek-harness
-adp config set customPrompt '用中文描述当前工作。' --agent deepseek-harness
-```
-
-With `service: session` and empty model/provider overrides, each client uses its own session model. Harness also reuses its in-process provider credentials. You can independently configure `enabled`, `service`, `model`, `provider`, `baseUrl`, `apiKeyEnv`, `customPrompt`, `maxLength`, and all `presence` fields. `enabled` controls automatic summaries, not lifecycle reporting.
-
-Inspect effective settings or remove an override:
-
-```sh
-adp config show --agent codex
-adp config show --agent deepseek-harness
-adp config unset customPrompt --agent codex
-```
-
-`unset --agent` restores inheritance from the global setting. Setting an empty model explicitly selects the session model even if a global model override exists. Without `--agent`, commands continue to change shared defaults. Nested objects such as `presence.assets` merge; arrays and explicit `null` replace inherited values. Saved overrides contain only fields you set, so future global changes still reach inherited fields.
-
-For example, one configuration file can contain:
-
-```json
-{
-  "service": "session",
-  "agents": {
-    "codex": {
-      "customPrompt": "Write summaries in English.",
-      "presence": {"name": "Codex: {topic}"}
-    },
-    "deepseek-harness": {
-      "customPrompt": "用中文描述当前工作。",
-      "presence": {"name": "DeepSeek: {topic}"}
-    }
-  }
-}
-```
-
-Settings reload automatically. After upgrading the daemon code, restart it once. `adp status` includes effective `agentSettings` for connected agents. Summary-policy changes discard obsolete work for affected agents; changing only another agent's overrides leaves their work intact.
-
-## Configuration presets
-
-Presets in [`presets.json`](presets.json) can contain any supported settings: prompt preferences, model/service selection, summary enablement, and `presence` fields such as images, buttons, text, and timers. Each preset is a partial settings object:
-
-```json
-{
-  "codex": {
-    "customPrompt": "Use concise English",
-    "maxLength": 60,
-    "presence": {
-      "assets": {
-        "large_image": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-png@1.97.0/dark/codex.png",
-        "large_text": "Codex"
-      }
-    }
-  }
-}
-```
-
-```sh
-adp preset list
-adp preset show codex minimal
-adp preset apply codex minimal --agent codex
-adp preset apply minimal playful
-adp config set presets '["codex","minimal"]'
-adp config unset presets --agent codex
-```
-
-`show` previews the combined preset fields without writing. `apply` writes directly to the configuration file and saves an ordered `presets` list, replacing the previous selection for that scope; no manual or agent edit is needed. It confirms the saved scope and file path on stderr and prints the saved configuration as JSON on stdout. Presets are applied left to right: later presets override earlier ones. For example, `codex minimal` combines the Codex image with the Minimal writing style; `minimal playful` uses the Playful style.
-
-Configuration stores selections separately from manual settings:
-
-```json
-{
-  "presets": ["codex", "minimal"],
-  "presence": {"assets": {"small_image": "my-badge"}},
-  "agents": {"pi": {"presets": ["pi", "playful"]}}
-}
-```
-
-Precedence, from lowest to highest: built-in defaults (including each agent's icon), global presets in order, agent presets in order, explicit global settings, explicit agent settings. Manual fields always win over presets, even when presets are selected afterward. Nested objects merge, omitted fields inherit, and arrays or `null` replace the inherited value. For example, `"presence": {"assets": null}` clears images and `"presence": {"buttons": []}` clears buttons.
-
-Use `config unset KEY` (optionally with `--agent`) to remove a manual override and reveal the preset value. Use `config unset presets` or `config set presets '[]'` to clear that scope's selection; clearing an agent's selection still inherits global presets. Invalid selections leave the config untouched. The `default` preset supplies an empty `customPrompt`; it does not reset other settings or remove manual overrides.
-
-Existing configuration fields remain explicit overrides. Values written by older versions of `preset apply` also remain explicit because their origin was not recorded; unset any such fields you want the new preset selection to control.
-
-The bundled presets are `default`, `minimal`, `playful`, `codex`, `claude-code`, `opencode`, `pi`, and `deepseek-harness`. Each agent automatically gets its matching preset’s large image and hover label. These image defaults sit below explicit global settings and per-agent overrides; preset prompt/model fields are not applied automatically. Use `adp preset apply deepseek-harness --agent deepseek-harness` to select an agent’s image preset. Icon assets come from [Lobe Icons](https://github.com/lobehub/lobe-icons), pinned to version 1.97.0. To add bundled presets when developing from source, edit `presets.json`; the file is included in the npm package. For persistent personal settings, use `adp config set`. Existing string-valued prompt presets must be converted to objects such as `{"customPrompt": "..."}`. `adp prompt NAME` still previews only the prompt-related fields, without applying the preset. Saved presentation settings update in the running service without a restart; model settings affect new summary jobs.
-
-## Default presence prompts
-
-The package includes a default activity-writing prompt in [`prompts/presence.md`](prompts/presence.md), editable preferences in [`prompts/default.json`](prompts/default.json), and configuration presets in [`presets.json`](presets.json).
-
-Automatic summaries are enabled by default. After a completed reply, the adapter sends at most 4,000 Unicode characters of assistant text to the local service. A background worker uses this prompt to generate the activity title and subtitle. It never reads transcript files. These prompts generate activity text, not full plugin settings such as images, buttons, or timers.
-
-Print the complete system prompt, configuration, and JSON output schema:
-
-```sh
-adp prompt
-adp prompt minimal
-adp prompt playful
-```
-
-The default produces a short English action phrase (`topic`) and a complementary `subtitle`, limited to 72 characters each. The subtitle can be empty. Language and tone can be changed through `customPrompt`; output structure, length, accuracy, and public-information constraints remain in effect. For example:
-
-```json
-{
-  "customPrompt": "Use concise, natural English. Focus on the goal and avoid emoji.",
-  "maxLength": 72
-}
-```
-
-Expected output shape (illustrative, not generated from your current session):
-
-```json
-{
-  "topic": "Debugging Discord presence updates",
-  "subtitle": "Checking recovery after reconnecting"
-}
-```
-
-For other model integrations, `buildPresencePrompt` is exported from `agent-discord-presence/prompts`. It accepts `{agent, response}` and optional `{customPrompt, maxLength}`, and returns `{systemPrompt, prompt, schema}` without invoking a model itself. Input is capped at 4,000 Unicode code points and output limits can be set from 20 to 120 characters. A caller must still validate model output, discard stale results from other sessions, and retain lifecycle labels on failure. Prompt instructions alone do not enforce output validity or privacy.
-
-The action-phrase/subtitle approach and custom-style behavior were inspired by [Cola Discord Presence's generation prompt](https://github.com/LitoMore/cola-plugin-discord-presence/blob/main/src/index.ts). The defaults here are written for multiple coding agents and distinguish planning, implementation, and verified results.
-
-### Automatic generation and model selection
-
-Default behavior is `service: "session"` with an empty `model` override. The worker reuses the installed agent CLI, or the in-process Harness LLM service, with the model ID reported by the current session. It does not silently substitute a model if that ID is missing; the previous summary remains visible. CLI worker failures appear in `adp status`; Harness auxiliary failures are contained in the plugin. An explicit `model` overrides the session model.
-
-| Agent | Reply source and trigger | Native generation |
-| --- | --- | --- |
-| Codex | `Stop.last_assistant_message`; model from hook input | Logged-in `codex exec`, ephemeral session, read-only sandbox, hooks/plugins and execution tools disabled |
-| Claude Code | `Stop.last_assistant_message`; model retained from hook input | `claude -p --safe-mode`, no tools or persisted session |
-| Pi | Assistant text blocks, submitted at `agent_settled`; model/provider from context | `pi --print`, no tools/extensions/skills or saved session |
-| OpenCode | Assistant message text parts, submitted at idle; model/provider from message metadata | `opencode run`, all tool permissions denied; summary runs appear in OpenCode session history |
-| DeepSeek Harness | Completed assistant text, submitted at actual idle; model/provider from message source | In-process `ctx.llm.stream`, reusing Harness provider credentials; no tools or conversation history |
-| DimAgent | Filtered user goal at UserPromptSubmit; final assistant text of Stop.run_id from a bounded export; model/provider from session metadata | Fresh dim exec with no tools, hooks disabled, read-only policy and the same configured home/credentials; auxiliary sessions may persist |
-
-For CLI-based adapters, the native CLI must be available to the service and already authenticated. Current CLI flags are required; in particular Claude Code must support `--safe-mode`. Model definitions or credentials available only inside an agent's project may not be available in the worker's temporary working directory. Codex workers skip the user config to avoid inheriting unrelated MCP integrations; custom Codex model-provider definitions should use the explicit API service below. This follows the session model ID, not its reasoning effort or the entire original conversation.
-
-Codex native generation has been verified live using the current session's `gpt-6-astra` model. Claude Code, Pi, and OpenCode native process invocation still need live verification on those clients; their event-to-generation paths are covered by integration tests.
-
-Configure from a terminal, including a terminal invoked by your coding agent:
-
-```sh
-adp config show
-adp config set customPrompt 'Use concise, natural English without emoji'
-adp config set maxLength 72
-adp config set model ''             # follow the current session model
-adp config set enabled false        # stop scheduling new summaries
-adp config set enabled true
-adp config set idleMinutes 5 --agent dimagent  # hide idle hook sessions after five minutes
-```
-
-Settings are saved to `~/.config/agent-discord-presence/config.json`, respecting `XDG_CONFIG_HOME`, or `ADP_CONFIG` when set. New generation jobs read updated settings without restarting the daemon. Already-running jobs may finish using their previous settings. The default prompt is English; the conversation language does not automatically select the summary language. Phase labels such as Working remain English.
-
-To use a separate OpenAI-compatible Chat Completions service:
-
-```sh
-adp config set baseUrl 'https://your-provider.example/v1'
-adp config set model 'your-model-id'
-adp config set apiKeyEnv 'PRESENCE_API_KEY'
-adp config set service 'openai-compatible'
-```
-
-Set `PRESENCE_API_KEY` in the **service process's environment**, then start/restart the service. Only the environment variable name is saved in the config, never the key. For local servers without authentication, set `apiKeyEnv` to an empty string and use a localhost HTTP URL. Remote services require HTTPS. The service must accept `/chat/completions` with `response_format: {"type":"json_object"}`. The plugin validates both returned fields and the configured length limit.
-
-For a native Pi/OpenCode provider override, keep `service` as `session` and set `provider` and `model` to that agent's identifiers. Restore session defaults with:
-
-```sh
-adp config set service session
-adp config set model ''
-adp config set provider ''
-```
-
-Generation is serialized, limited to one active request with a bounded queue, and times out after 60 seconds. Duplicate completions are coalesced. New work, closed/expired sessions, or manual summary edits invalidate pending results. Generation failures keep the previous title; `adp status` includes job counts and a diagnostic without model input or provider stderr. Dry-run mode does not call models by default. Native summary subprocesses set a recursion guard so their own Presence adapters cannot create more summary jobs.
-
-Assistant text is transient in this service: it is not stored in session state or printed by status. The chosen provider receives it, and native CLIs may maintain their own logs/history as described above. The prompt requests public wording and omission of sensitive details; text/schema validation is not a guarantee of semantic redaction.
-
-From a built source checkout, a live generation smoke check uses public fixture text and a private dry-run service, without publishing the fixture to Discord:
-
-```sh
-node scripts/smoke-generation.mjs CURRENT_MODEL_ID
-```
-
-### Images and display settings
-
-All display overrides live under `presence` in the same user config. Use `adp config set` with a dotted key, or provide a JSON object for a whole section. Changes are picked up by the running service within about a second, then sent at the Discord update interval (normally up to five seconds). Invalid file edits keep the last valid configuration; `adp status` reports `settingsError`.
-
-Set large and small images and their hover text:
-
-```sh
-adp config set presence.assets.large_image 'https://example.com/presence.png'
-adp config set presence.assets.large_text '{topic}'
-adp config set presence.assets.small_image 'my-agent-icon'
-adp config set presence.assets.small_text '{agent}'
-```
-
-Replace the example URL with a publicly accessible HTTPS image URL. Local paths and data URLs are not supported. Alternatively, use an asset key uploaded to the **same Discord application** selected by `--client-id` or `DISCORD_CLIENT_ID`. Asset keys belong to that application's owner; users of the built-in application can use external image URLs or select their own application. Discord documents [external images and application assets](https://docs.discord.com/developers/rich-presence/using-with-the-embedded-app-sdk#using-external-custom-assets). Image loading and rendering depend on the Discord client.
-
-| Setting | Value and default behavior |
-| --- | --- |
-| `presence.name` | Title text or template; defaults to `{topic}` |
-| `presence.details` | Detail text or template; defaults to `{phase}`; `null` hides it |
-| `presence.state` | State text or template; defaults to `{subtitle}`; `null` hides it |
-| `presence.type` | `0` Playing (default), `2` Listening, `3` Watching, `5` Competing |
-| `presence.status_display_type` | `0` name, `1` state, or `2` details for the compact activity label |
-| `presence.details_url`, `presence.state_url` | HTTPS links attached to the corresponding text |
-| `presence.assets.large_image`, `presence.assets.small_image` | Public HTTPS image URL or application asset key |
-| `presence.assets.large_text`, `presence.assets.small_text` | Hover text or template |
-| `presence.assets.large_url`, `presence.assets.small_url` | HTTPS links attached to the images |
-| `presence.timestamps` | JSON object with `start` and/or `end` in Unix **seconds**; `start` also accepts `"session"`; `null` hides the timer |
-| `presence.buttons` | JSON array of up to two `{label, url}` objects; URLs must use HTTPS |
-| `presence.party` | Optional JSON object with `id` and/or `size: [current, maximum]`; `null` removes it |
-
-Text templates support `{topic}`, `{subtitle}`, `{agent}`, `{phase}`, and `{state}` (the raw lifecycle state). Only text fields and button labels expand templates; URLs and asset keys stay literal. Fixed text takes priority over generated summaries. With no summary, `{topic}` falls back to `Coding with AGENT` and `{subtitle}` to `AGENT session`. Removing an override restores the original automatic layout.
-
-```sh
-adp config set presence.name '{agent}: {topic}'
-adp config set presence.details 'Working on a personal project'
-adp config set presence.state null
-adp config set presence.type 3
-adp config set presence.timestamps null
-adp config set presence.buttons '[{"label":"Project","url":"https://example.com"}]'
-```
-
-For elapsed session time or a countdown:
-
-```sh
-adp config set presence.timestamps '{"start":"session"}'
-# Replace with your desired future Unix timestamp in seconds:
-adp config set presence.timestamps '{"end":2000000000}'
-```
-
-Reset individual overrides or the entire display configuration:
-
-```sh
-adp config unset presence.assets.small_image
-adp config unset presence.name
-adp config unset presence.timestamps
-adp config unset presence
-```
-
-Setting `presence.assets` to `null` removes both images; setting `presence.buttons` to `[]` removes buttons. Text is limited to 128 Unicode characters and button labels to 32; expanded templates are truncated at those limits. Configuration persists across restarts, while generated summaries remain in memory. Manual display updates do not invoke a model. The summary `customPrompt` controls generated text only; image URLs and other settings can be configured by asking your coding agent to run these commands.
-
-These are display controls, not Discord account settings. Streaming/custom-status activity types and interactive game join/spectate actions are not implemented. Discord controls the final rendering, and newer link/display fields may vary by client version. See the [Discord activity field reference](https://docs.discord.com/developers/events/gateway-events#activity-object) for platform behavior.
-
-### Summary title layout
-
-The activity card uses a summary-first layout:
-
-| Discord field | Content |
-| --- | --- |
-| `name` (title) | Summary `topic`, without an application-name prefix |
-| `details` | Current lifecycle phase, such as Working or Waiting for input |
-| `state` | Complementary `subtitle`, or e.g. Codex session when absent |
-| `timestamps.start` | Observed session start time |
-
-For example: **Debugging Discord presence updates** / Working / Checking recovery after reconnecting. Without a summary, the title falls back to `Coding with Codex` (or the current agent). A summary stays visible while the session is idle, until explicitly replaced, cleared, or the session ends. It is held in memory and does not survive a service restart.
-
-Use the exact session key from `status` to publish text already prepared for public display:
-
-```sh
-adp status
-adp summary 'codex:SESSION_ID' 'Debugging Discord presence updates' 'Checking recovery after reconnecting'
-adp clear-summary 'codex:SESSION_ID'
-```
-
-The topic is required; the subtitle is optional. Duplicate subtitles are omitted. Both fields are bounded to 120 Unicode characters; the default generation prompt uses the stricter 72-character limit. Text is deliberately supplied separately from raw hooks; user prompts and assistant responses are not automatically treated as public summaries.
-
-Model integrations can import `summaryTarget` and `publishSummary` from `agent-discord-presence`. Capture `summaryTarget(key)` **before** generation, then pass that target and validated `{topic, subtitle}` output to `publishSummary`. The daemon rejects updates after the target session has changed or closed. Summaries never change session selection priority or extend the session's liveness timeout. Use fresh source context to regenerate after a stale-target rejection.
-
-## Connect your agents
-
-Start the shared service before using any adapter. Use one installation method per agent to avoid duplicate hooks. The `config codex|claude-code|opencode|pi` commands only print adapter configuration; `config set` saves this plugin’s summary settings. Generated configuration uses absolute paths to the installed package and, for hooks, the Node.js executable. Regenerate it if either location changes, such as after switching Node.js installations.
-
-### Codex
-
-Generate hooks with absolute executable paths:
-
-```sh
-adp config codex
-```
-
-Merge the generated `hooks` entries into `~/.codex/hooks.json` (or the project's `.codex/hooks.json`). Preserve existing hooks. In Codex, open `/hooks` and review/trust the new hooks, then start a new session.
-
-A distributable plugin is also included at `plugins/codex/agent-discord-presence`. The package directory is `agent-discord-presence` inside the global modules directory shown by `npm root --global`. It uses the default `hooks/hooks.json` discovery convention. Its commands require `agent-discord-presence` on PATH, provided by the global npm installation above. Add the plugin to your own Codex plugin marketplace; marketplace registration is not automatic.
-
-### Claude Code
-
-```sh
-adp config claude-code
-```
-
-Merge the generated `hooks` entries into `~/.claude/settings.json` (or project `.claude/settings.json`), preserving existing settings. Restart Claude Code.
-
-Alternatively, after the global npm installation above, load the bundled plugin (POSIX shell):
-
-```sh
-claude --plugin-dir "$(npm root --global)/agent-discord-presence/plugins/claude-code/agent-discord-presence"
-```
-
-### DimAgent
-
-This adapter targets the public DimAgent CLI command-hook API, checked against `dimcode` / `dimagent` 0.5.21. It does not assume that DimAgent exposes the Harness Cordis events or a rutis service contract. The public [CLI documentation](https://dimagent.cn/docs/cli) describes command hooks and plugin installation; the precise payload was checked in the published 0.5.21 binary's bundled `agent/src/hooks/command/config.ts` and `protocol.ts`.
-
-The upstream npm 0.0.3 package does not contain this adapter. From a checkout of a revision containing it, install the built CLI on PATH:
+更新源码并重新构建、安装后，重启 ADP，使运行中的服务加载新代码：
 
 ```sh
 npm ci
 npm run build
 npm install --global .
+adp stop
 adp start -b
+```
+
+已安装的客户端插件也应按客户端要求重载或重启。更新前先处理自己的本地修改。
+
+<a id="service"></a>
+## 服务管理
+
+```sh
+adp start -b       # 后台运行，返回 PID 和日志路径
+adp status        # 查看 Discord 连接、会话与有效配置
+adp stop          # 清除活动并停止服务
+```
+
+前台运行使用 `adp start`，以 Ctrl+C 停止。`adp start --dry-run` 输出活动 JSON，适合预览；默认不调用摘要模型。后台启动继承当前终端的环境变量，终端关闭后服务继续运行，但不会配置开机自启或崩溃自动恢复。
+
+`status` 中 `discord: "connected"` 表示 IPC 已连接，`activityAcknowledged: true` 表示 Discord 已确认当前活动。活动为 `null` 时，先检查是否已有 Agent 会话。图像最终是否渲染仍需查看 Discord 客户端。
+
+项目自带 Application ID `1549160807705870418`，定义在 `src/constants.ts`。也可通过 `--client-id` 或 `DISCORD_CLIENT_ID` 指定自己的 Discord application。ADP 不需要 bot token。预上传的 Discord asset key 必须属于当前 application。
+
+| 参数或环境变量 | 用途 |
+| --- | --- |
+| `--client-id` / `DISCORD_CLIENT_ID` | Discord Application ID |
+| `--socket` / `AGENT_PRESENCE_SOCKET` | 本地服务地址；客户端与服务需一致 |
+| `DISCORD_IPC_PATH` | 覆盖 Discord IPC 路径发现 |
+| `--stale-minutes N` | 命令 hook 的静默超时，1–1440 分钟，默认 30 |
+| `--dry-run` | 输出活动 JSON |
+| `ADP_CONFIG` | 使用指定配置文件 |
+
+Windows 使用命名管道，Unix 使用本地 socket。远程 Agent、容器和 SSH 会话需要另外安排可达的本地 IPC 转发；ADP 不会自动跨机器连接桌面 Discord。
+
+<a id="dim-rust-alpha"></a>
+## Dim Rust α
+
+本节用于开源 [arcships/dim](https://github.com/arcships/dim) 的 Rust harness。npm alpha 包为 `dimcode-alpha`，命令为 `dima`；源码构建的二进制通常名为 `dimcode`。
+
+### 安装原生插件
+
+先完成上面的 fork 安装并启动 ADP，再执行：
+
+```sh
+npm install --global dimcode-alpha@alpha
+dima --version
+dima runtime config node --source system
+dima runtime install node
+dima plugin install "/absolute/path/to/agent-discord-presence/plugins/dim"
+dima runtime list
+dima plugin list
+```
+
+把路径换成此 fork 的真实位置。运行环境安装是异步的，等待 Node runtime 为 `ready`、`agent-discord-presence` 为 `running` 后再启动任务。Dim 管理自己的运行环境依赖；系统 Node 需要满足其版本要求，已验证组合为 Node 24.13.0。
+
+插件源目录需保留。全局安装后的目录也可使用：`<npm root --global>/agent-discord-presence/plugins/dim`。嵌入式宿主可导入 `agent-discord-presence/dim`。
+
+```sh
+dima
+```
+
+首次使用需要登录或配置模型。例如 Dim 账号登录可使用 `dima login dimcode-api-oauth`，也可在交互界面选择登录方式。安装插件和正常运行应使用同一 Dim home；alpha 默认使用 `~/.dimcode-alpha`，与旧版 CLI 的数据目录分开。账号与会话不会因安装 ADP 自动迁移。
+
+<a id="dim-windows"></a>
+### Windows alpha.19 的 Node 路径兼容
+
+在 Windows、Dim Rust `0.1.0-alpha.19`、Node 24.13.0 的组合上，官方启动链路可能把 verbatim 路径传给 Node，导致 `EISDIR ... lstat 'C:'`，或 Node runtime 在连接前退出。
+
+在启动 Dim 的 PowerShell 终端设置以下选项后重试：
+
+```powershell
+dima daemon stop
+$env:NODE_OPTIONS = "$env:NODE_OPTIONS --preserve-symlinks --preserve-symlinks-main".Trim()
+dima runtime config node --source system
+dima runtime install node
+dima runtime list
+dima plugin list
+```
+
+环境变量只对当前终端及其子进程生效。从其他终端重新启动 Dim daemon 时，也需提供这两个选项。对本机 Dim 启动器所做的补丁不会随 ADP 源码安装自动应用，升级 Dim 也可能覆盖它。修复后的 Dim 版本可重新检查是否仍需此兼容设置。
+
+### 状态与摘要
+
+原生插件订阅 Session 事件，并为每个 Session / branch 独立上报状态：
+
+| 事件 | ADP 状态 |
+| --- | --- |
+| `turn/start` | Working |
+| 有未结束的 `approval/request` | Waiting；所有授权请求结束后恢复 |
+| 回合完成、取消或中断 | Idle |
+| 回合失败 | Error |
+| 分支结束、Session 关闭或插件卸载 | 关闭对应 reporter |
+
+会话 key 为 `dimagent:rust:…`，后半部分由 Session / branch 标识计算；复制 `adp status` 中的完整 key 来固定会话或设置手动摘要。插件每 20 秒发送心跳，ADP 重启后可自动恢复该会话。
+
+两代 Dim 共用 `--agent dimagent` 配置和 `DimAgent` 默认显示标签。该适配通过独立插件复用现有协议、服务和显示配置。
+
+默认 `service: session` 时，完成摘要通过 Dim 的 `auxiliaryModel.complete` 调用当前模型与 provider，直接复用 Dim 的凭据。调用只含 presence 提示词和最多 4,000 个 Unicode 字符的最终助手文本，没有工具或原会话历史，也不启动旧版 CLI、读取 session export。文本增量和可选的完整内容快照都可处理。
+
+只有对应请求以 `end_turn` 完成、回合成功且最终消息不含工具调用时才生成摘要；推理、工具参数、工具结果及失败/取消的输出不作为摘要正文。生成队列有界、串行执行，超时 60 秒；会话变化时丢弃过期结果，失败保留已有标题。此适配目前生成完成摘要，旧版适配的早期目标标题与工具阶段模板见下一节。
+
+Rust 插件的摘要任务不计入 ADP daemon 的 `generation`、`dimagentCapture` 或 `dimagentLive` 计数。选择 `openai-compatible` 时，相关端点、模型设置和 API key 环境变量需要对 **Dim 进程** 可见。
+
+<a id="dimagent-typescript"></a>
+## 旧版 DimAgent CLI / Desktop
+
+本节用于旧版 TypeScript `dim` / `dimagent` CLI，以及共用其 hooks 的 Desktop。接入契约检查版本为 CLI 0.5.21；Desktop 0.9.56 的 bundled CLI 0.5.20 也通过了隔离验证。
+
+选择插件或手动 hooks 中的一种安装方式，避免重复上报。
+
+### 插件安装
+
+```sh
 dim plugin install "/absolute/path/to/agent-discord-presence/plugins/dimagent/agent-discord-presence"
 ```
 
-Replace the path with this checkout's plugin directory. The bundled `.codex-plugin/plugin.json` explicitly declares `hooks/hooks.json`; its commands use `agent-discord-presence hook dimagent` from PATH. Restart DimAgent after installation. These commands use the `dim` entry point; use `dimagent` if that is your installed CLI name. Plugin installation is local and does not register a marketplace.
+如本机命令名为 `dimagent`，用该命令替换 `dim`。插件的 hook 命令依赖 PATH 中的 `agent-discord-presence`，安装后重启客户端。
 
-Alternatively, print configuration with absolute paths to the current Node executable and ADP checkout:
+### 手动 hooks 与 Desktop
 
 ```sh
 adp config dimagent
 ```
 
-Merge the printed `hooks` entries into the DimAgent home directory's `hooks.json`, preserving existing entries. For the `dim` edition this defaults to `~/.dimcode/v2/hooks.json`; the international edition uses `~/.dim/v2/hooks.json`. `DIMCODE_HOME` overrides the home directory. The project file is `.dimcode/hooks.json` for `dim` (international edition: `.dimglobal/hooks.json`). Configuration generation works on Windows and POSIX; save the JSON as UTF-8. Install either the plugin or the generated hooks once to avoid duplicate events.
+把输出的 `hooks` 条目合并到对应 home 的 `hooks.json`，保留原有条目并使用 UTF-8。此命令只打印配置，不会自动安装。中国版常见目录为 `~/.dimcode/v2/hooks.json`，国际版为 `~/.dim/v2/hooks.json`；`DIMCODE_HOME` 可覆盖。项目文件分别为 `.dimcode/hooks.json`、`.dimglobal/hooks.json`。
 
-`dim hooks list --json` reviews user/project hooks. In 0.5.21 it does not enumerate plugin hooks, so an empty list alone does not mean a plugin failed to load. Run a task and check `adp status` for a `dimagent:SESSION_ID` entry to verify either installation method.
+生成器支持 Windows 与 POSIX 的绝对路径。Desktop 也可采用这种方式，以便避开 GUI 进程的 PATH 差异；修改后开启新会话，已有会话必要时重启 Desktop。
 
-| Host event | Presence |
-| --- | --- |
-| `SessionStart` | Idle |
-| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact` | Working |
-| `PermissionRequest` | Waiting; a later tool or turn event resumes activity |
-| `Stop` | Idle |
-| `SubagentStart` / `SubagentStop` | Start / close the child identified by `agent_id`, keeping the parent independent |
-
-The command-hook API has no `SessionEnd`, `Interrupt`, `StopFailure`, or `PostToolUseFailure` event. Exit, cancellation, and errors therefore have no distinct reliable event mapping. Sessions expire after the hook silence timeout (default 30 minutes, configurable with `start --stale-minutes N`), including idle sessions left after exiting the CLI. A denied permission may remain Waiting until the next lifecycle event or timeout. `Stop` is advisory: another hook can request continuation, causing transient Idle until another activity event arrives.
-
-Live titles are enabled by default. `UserPromptSubmit` immediately displays `正在分析任务`, then a background worker generates a public goal title from at most 2,000 Unicode characters of the request. The hook removes common credential assignments, token patterns, URLs and local paths before sending this transient context to the daemon. This filtering is best effort; the model is also instructed to generalize private details. Goal titles describe requested work and must not claim completion. The worker obtains the exact session's model/provider using `dim session list --all --json`, bounded at 8 MiB / 10,000 entries; explicit settings take precedence. This metadata command works while the active host holds the session lease, whereas export/show cannot. List output can include other sessions' titles and prompt previews; these are temporarily read, discarded and never passed to the model or ADP status/logs. Tool events and approval waits do not cancel that task's title generation.
-
-Progress uses fixed Chinese templates such as `阅读项目文件`, `修改项目文件`, `运行命令` and `等待工具授权`. Only whitelisted tool names select a phase; arguments, results and reasoning are excluded. Progress changes coalesce to the latest phase every five seconds; entering or leaving an approval wait updates immediately. These phases do not make model calls or claim successful tests. A new user prompt replaces the previous goal; a manual summary edit holds ownership until the next prompt.
-
-The current `Stop` payload has no completed assistant reply, but it includes `run_id`. The hook immediately publishes Idle and sends that identifier to ADP. In the background, the daemon invokes `dim session export SESSION_ID`, selects the final assistant text belonging to that exact session and run, and submits at most 4,000 Unicode characters to the completion summary worker. It obtains the model/provider route from the export; explicit per-agent model/provider settings still take precedence. New work or a manual summary edit invalidates pending capture/generation. A title still being generated at Stop is discarded; the completed-reply summary then replaces the goal title.
-
-Automatic summaries are enabled by default. With `service: session`, each goal/completion worker invokes a fresh `dim exec --json --no-hooks --policy read-only --tools ''` request using the configured DimAgent home and credentials. This call has no tools or original conversation history: it receives the presence prompt/schema and either the filtered goal or bounded final assistant reply. Both export and generation set `ADP_SUMMARY_WORKER=1` and `DIM_DISABLE_HOOKS=1`, preventing helper sessions from reporting presence or recursively scheduling summaries. Native auxiliary calls can appear in DimAgent's persisted session history, consume model usage, and keep their own logs; they are not ephemeral.
-
-Use the native command and data home matching your Desktop/CLI. `ADP_DIMAGENT_COMMAND` selects the executable; on Windows ADP discovers the standard Desktop installation's `resources/runtime/cli/dim.exe` when available, otherwise it uses `dim` from PATH. On Windows without Desktop, set the absolute path of a native executable rather than an npm `.cmd` shim. `DIMCODE_HOME` must refer to the home containing the session and model credentials. These variables belong in the **daemon's environment**, followed by a service restart; no executable or data-directory path is accepted from hook input. For example in PowerShell:
+摘要服务需要能找到匹配的旧版原生 CLI 和包含会话、模型凭据的 home。Windows 会尝试发现标准 Desktop 安装中的 `resources/runtime/cli/dim.exe`，也可显式设置：
 
 ```powershell
 $env:ADP_DIMAGENT_COMMAND = "$env:LOCALAPPDATA/Programs/DimAgent/resources/runtime/cli/dim.exe"
 $env:DIMCODE_HOME = "$env:USERPROFILE/.dimcode/v2"
-node dist/cli.js start -b
+adp start -b
 ```
 
-Configure summary style/model normally, or select the existing OpenAI-compatible service with `--agent dimagent`:
+把这些变量提供给 ADP daemon，并在变更后重启服务。`ADP_DIMAGENT_COMMAND` 应指向原生可执行文件；npm `.cmd` shim 不适合此处的直接进程调用。`dim hooks list --json` 在 0.5.21 中不枚举插件 hooks，可通过执行任务后查看 `adp status` 验证接入。
+
+### 目标标题、阶段与完成摘要
+
+`UserPromptSubmit` 先显示“正在分析任务”，后台再从最多 2,000 个字符的用户目标生成标题。常见 token、凭据赋值、URL 和路径会先过滤；这不是完整的语义脱敏保证。工具名称选择“阅读项目文件”“修改项目文件”“运行命令”等固定阶段，阶段变化通常每 5 秒合并更新，授权等待立即更新。
+
+该任务的模型路由由 `dim session list --all --json` 读取。完成时，hook 携带 `Stop.run_id`，daemon 再通过有界 `dim session export SESSION_ID` 选择该次运行的最终助手文本。导出最多 8 MiB / 10,000 条消息，捕获期限 15 秒，缺失时最多读取三次；模型最终只收到最多 4,000 个字符的助手文本。读取过程中可能临时接触其他会话预览或当前会话历史，相关内容不写入 ADP 状态和日志。
+
+默认摘要使用无工具的旧版 `dim exec` 辅助调用，禁用 hooks、使用只读策略及递归保护。辅助会话可能保留在 DimAgent 自己的历史和日志中。新任务、手动摘要或配置变更会使旧的捕获/生成失效。
 
 ```sh
-adp config set customPrompt '用简洁中文描述任务。' --agent dimagent
-adp config set service session --agent dimagent
-adp config set liveSummaries false --agent dimagent
-adp config set enabled false --agent dimagent
+adp config set liveSummaries false --agent dimagent  # 关闭早期目标标题和阶段模板
+adp config set enabled false --agent dimagent        # 关闭模型摘要，保留状态
+adp config set idleMinutes 5 --agent dimagent        # 缩短空闲 hook 会话保留时间
 ```
 
-Setting `liveSummaries: false` disables early goal titles and phase templates while retaining completion summaries. Setting `enabled: false` skips all summary metadata/export reads and model calls, keeping lifecycle reporting active. `adp status` includes content-free `dimagentLive` and `dimagentCapture` counters/diagnostics; completion model results/errors remain under `generation`. A local export is capped at 8 MiB; completion capture also bounds the session at 10,000 messages, has a 15-second deadline and retries missing final text up to three times. Oversized/unavailable exports, missing or mismatched run IDs, later runs, terminal notices and tool-call endings skip the completion summary instead of reusing an earlier reply. ADP temporarily reads the local export, which can contain the rest of that session, without persisting or logging it. Completion workers receive only final assistant text; goal workers receive only the filtered request. Neither uses reasoning, tool arguments or tool results. A daemon serving a different DimAgent home fails rather than guessing a session.
+旧版 hook 契约没有 `SessionEnd`、`Interrupt`、`StopFailure` 或 `PostToolUseFailure`。退出、取消和错误无法可靠单独映射，静默会话依赖超时清理。授权拒绝后没有新事件时，Waiting 也可能保持到下一事件或超时；其他 Stop hook 请求继续执行时，可能短暂显示 Idle。
 
-Manual public summaries and display overrides remain available:
+<a id="other-agents"></a>
+## 其他 Agent
+
+先启动 ADP，再接入客户端。现有配置需要合并，避免覆盖其他 hooks 或插件。
+
+### Codex
+
+POSIX 环境可运行：
 
 ```sh
-adp status
-adp summary 'dimagent:SESSION_ID' 'Adapting Discord presence' 'Checking lifecycle hooks'
-adp config set presence.name 'Coding with DimAgent' --agent dimagent
+adp config codex
 ```
 
-Hooks send lifecycle fields, the Stop run ID, filtered user goals and fixed phase identifiers. They exclude transcript paths, working directories, tool arguments and tool results. They emit no output, do not wait for export/model calls, and tolerate a stopped daemon. Goal text exists only in pending/active work; it is absent from ADP status and logs.
+将输出合并到 `~/.codex/hooks.json` 或项目 `.codex/hooks.json`，在客户端检查 hooks 的启用/信任状态，然后开启新会话。
 
-The real-host smoke check installs the plugin into a temporary DimAgent home, calls a local fake model, checks a goal title before task completion, Working/Idle transitions, completion and manual summaries through the real daemon, and uses a fake Discord transport. It checks credential filtering and tool-free summary requests; the completion worker must not receive the original user prompt. It neither needs provider credentials nor changes Discord activity:
+Windows 下此绝对路径生成器会报平台限制。可使用 `plugins/codex/agent-discord-presence/hooks/hooks.json` 中的 PATH 命令条目进行合并；`agent-discord-presence` 必须在客户端 PATH 中。仓库也附带 `plugins/codex/agent-discord-presence` 插件包装，marketplace 注册由客户端安装流程完成。
+
+### Claude Code
+
+POSIX 环境运行 `adp config claude-code`，合并到 `~/.claude/settings.json` 或项目 `.claude/settings.json` 后重启客户端。Windows 可使用 `plugins/claude-code/agent-discord-presence/hooks/hooks.json` 中的 PATH 命令条目。
+
+也可直接加载此 fork 的插件目录：
 
 ```sh
-npm run build
-node scripts/smoke-dimagent.mjs /absolute/path/to/dim
-node scripts/smoke-dimagent.mjs /absolute/path/to/dim --external
+claude --plugin-dir "/absolute/path/to/agent-discord-presence/plugins/claude-code/agent-discord-presence"
 ```
-
-Verified on Windows x64 with DimAgent 0.5.21 and Node 24.13.0. Approval, subagent ID mapping, expiry, malformed input, privacy and offline behavior are additionally covered by contract/integration tests. Live Discord rendering and interactive TUI approvals have not been tested for this adapter.
-
-#### DimAgent Desktop
-
-The installed Windows Desktop 0.9.56 bundle was inspected separately: it loads the same command-hook schema, the same plugin `hooks` manifest entry, and the global `hooks.json` from its DimAgent home. It registers those hooks when preparing a session. The CN desktop defaults to `~/.dimcode/v2`, shared with the `dim` CLI; `DIMCODE_HOME` can select a different home. The existing adapter can therefore be reused without a separate desktop protocol.
-
-For desktop use, generated hooks with absolute executable paths avoid depending on the GUI's inherited PATH:
-
-```sh
-node dist/cli.js config dimagent
-```
-
-Merge the printed entries into the desktop's `<DIMCODE_HOME>/hooks.json` (CN default: `~/.dimcode/v2/hooks.json`), preserving existing hooks, then start a new desktop session. Restart Desktop to reload hooks for existing sessions. Start the ADP daemon with `node dist/cli.js start -b` before running a task. Automatic summaries use the matching CLI and home described above; the silence-timeout limitation also applies to Desktop.
-
-The bundled plugin is another option when the installed `agent-discord-presence` command is on Desktop's PATH. Install it into the same home using the matching CLI and restart Desktop. Avoid installing both methods together.
-
-This confirms the installed Desktop's loading code and payload compatibility. The real-host smoke script also passed against its bundled `resources/runtime/cli/dim.exe` (CLI 0.5.20): plugin installation, Working/Idle transitions, automatic summaries using the exported session model, and manual summaries. That exercises the bundled CLI rather than the Electron GUI; live GUI/Discord verification is still outstanding.
 
 ### OpenCode
 
@@ -478,125 +224,270 @@ This confirms the installed Desktop's loading code and payload compatibility. Th
 adp config opencode
 ```
 
-Save the printed export statement in `~/.config/opencode/plugins/agent-presence.ts` or `.opencode/plugins/agent-presence.ts`, creating the directory if needed. Restart OpenCode. The adapter uses OpenCode's `event` subscription and handles `session.status`, `session.idle`, `session.error`, and permission events. It works with the documented plugin API at `opencode.ai/docs/plugins/`; compatibility with a different major plugin API should be checked before upgrading.
+把输出的导出语句保存到 `~/.config/opencode/plugins/agent-presence.ts` 或项目 `.opencode/plugins/agent-presence.ts`，创建需要的目录并重启 OpenCode。插件处理会话状态、空闲、错误和授权事件。
 
 ### Pi
-
-For a one-off session using the globally installed package (POSIX shell):
-
-```sh
-pi -e "$(npm root --global)/agent-discord-presence/dist/adapters/pi.js"
-```
-
-For automatic loading:
 
 ```sh
 adp config pi
 ```
 
-Save the printed export statement in `~/.pi/agent/extensions/agent-presence.ts`. Reload extensions or restart Pi. The npm package also declares its extension in the `pi.extensions` metadata.
+把输出保存到 `~/.pi/agent/extensions/agent-presence.ts`，再重载扩展或重启 Pi。临时加载也可使用 `pi -e /absolute/path/to/agent-discord-presence/dist/adapters/pi.js`。
 
-Pi must provide `agent_settled`, `ui_prompt_start`, and `ui_prompt_end` events. Older Pi versions that only emit `agent_end` are not supported: that event may precede automatic retry, compaction, or queued continuation, and would report idle too early.
-
+客户端需提供 `agent_settled`、`ui_prompt_start` 和 `ui_prompt_end` 事件。只有 `agent_end` 的旧版 Pi 无法准确区分重试、压缩和排队续跑。
 
 ### DeepSeek Harness
 
-The package is a Harness bundle containing a Cordis plugin. Build a local checkout before installing it:
+从已构建的 fork 源码安装本地 bundle：
 
 ```sh
-npm run build
 dsh plugin --profile web add /absolute/path/to/agent-discord-presence
-adp start -b
 ```
 
-Restart Harness using that profile. Once this package version is published, use `dsh plugin --profile web add agent-discord-presence` instead. Replace `web` with your own profile name. Remove it with `dsh plugin --profile web remove agent-discord-presence`.
+将 `web` 替换为自己的 profile，然后用该 profile 重启 Harness。移除使用 `dsh plugin --profile web remove agent-discord-presence`。
 
-The plugin tracks live `agent/status` transitions, approval audit events, errors, and agent disposal. It waits for actual idle before submitting completed assistant text, ignores reasoning and tool output, and closes all reporters on plugin unload. Concurrent sessions have independent state. Approval requests display Waiting; other interactive tools remain Working.
+插件跟踪真实 idle、授权、错误和卸载。默认通过 Harness 的 `ctx.llm.stream` 复用当前 provider 与模型，只传入 presence 提示词和有界助手回复；选择 `openai-compatible` 后由 ADP daemon 调用外部服务。原生摘要在插件内串行执行，并有取消和过期结果检查。
 
-Automatic summaries use the default `session` service: the plugin calls Harness’s registered LLM service with the current reply’s model and provider, reusing Harness’s configured credentials. No separate API key, endpoint, or OpenAI-compatible configuration is needed. Calls contain only the bounded completed reply and presence prompt, with no tools or conversation history. Explicit `model`/`provider` overrides still apply; selecting `openai-compatible` delegates generation to the daemon’s configured service instead.
+<a id="configuration"></a>
+## 独立配置与预设
 
-Native summaries run one at a time per plugin instance with a bounded queue and a 60-second deadline. New work, errors, agent disposal, and plugin unload cancel obsolete work. The daemon rejects results after session changes, manual summary edits, or summary configuration changes. Disabling automatic summaries preserves lifecycle presence. Native calls do not contribute to the daemon CLI worker counters.
+配置默认保存在 `~/.config/agent-discord-presence/config.json`，支持 `XDG_CONFIG_HOME` 和 `ADP_CONFIG` 覆盖。
 
-The adapter contract was checked against official Harness commit `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`; lifecycle integration tests use a simulated host and local daemon, not a live Harness/Discord connection. See the [official bundle installation contract](https://github.com/deepseek-ai/deepseek-harness/blob/0d1f50007f9bca3f52b06e1c3074fa14d5fb0720/docs/user/develop/basic/publish.md).
+```sh
+adp config show
+adp config show --agent dimagent
+adp config set customPrompt '用简洁中文描述任务。' --agent dimagent
+adp config set maxLength 72 --agent dimagent
+adp config unset customPrompt --agent dimagent
+```
 
-## Session selection and lifecycle
+`--agent` 可选值为 `codex`、`claude-code`、`opencode`、`pi`、`deepseek-harness` 和 `dimagent`。不带该选项时修改共享设置；两代 Dim 共用 `dimagent`。
+
+配置优先级从低到高为：内置默认值及 Agent 图标、全局预设、Agent 预设、显式全局设置、显式 Agent 设置。对象递归合并，数组和 `null` 替换继承值。`unset --agent` 移除该层覆盖并恢复继承。
+
+| 字段 | 默认值与用途 |
+| --- | --- |
+| `enabled` | `true`；控制模型摘要，状态接入继续工作 |
+| `customPrompt` | 空字符串；指定摘要语言、语气和侧重点 |
+| `maxLength` | `72`；生成标题与副标题各自的字符上限，允许 20–120 |
+| `service` | `session`；使用当前 Agent 的原生服务，或设为 `openai-compatible` |
+| `model` / `provider` | 空字符串；跟随会话，非空时覆盖 |
+| `liveSummaries` | `true`；旧版 DimAgent 的目标标题与阶段显示开关 |
+| `idleMinutes` | `0`；空闲命令 hook 的额外超时，正整数 1–1440 分钟 |
+| `presence` | 图标、文字、计时器等显示覆盖 |
+
+模型或提示词变更影响后续任务；已有生成结果会做相应的新鲜度检查。配置和显示可热更新，修改代码后需要重启服务。无效配置保留上次有效设置，错误通过 `settingsError` 报告。
+
+<a id="presets"></a>
+### 预设
+
+```sh
+adp preset list
+adp preset show dimagent minimal
+adp preset apply dimagent minimal --agent dimagent
+adp config unset presets --agent dimagent
+```
+
+预设定义在 `presets.json`。内置名称包括 `default`、`minimal`、`playful`、`codex`、`claude-code`、`opencode`、`pi`、`deepseek-harness`、`dimagent`。组合按顺序覆盖，显式用户设置仍有更高优先级。`apply` 保存所选预设名称；`default` 不会清空其他显式配置。
+
+Agent 的基础图标自动作为默认值使用。Codex、Claude Code、OpenCode、Pi 和 DeepSeek 图标来自固定版本的 [Lobe Icons](https://github.com/lobehub/lobe-icons)，DimAgent 默认图标来自其官方 favicon。彩虹 α 图标需要按下文显式启用。
+
+<a id="summaries"></a>
+## 摘要、模型和数据流
+
+默认摘要为短标题 `topic` 和补充说明 `subtitle`，每项上限 72 个 Unicode 字符；副标题可以为空。默认提示词使用英文，中文对话不会自动切换摘要语言，可通过 `customPrompt` 设置。状态标签如 Working、Waiting for input 仍为英文。
+
+```sh
+adp prompt
+adp prompt minimal
+adp config set customPrompt '用中文，简短描述实际工作，不夸大完成情况。'
+```
+
+| Agent | 原生生成输入与调用方式 |
+| --- | --- |
+| Dim Rust α | 最终模型请求的助手文本；Dim 辅助模型服务 |
+| 旧版 DimAgent | 过滤后的用户目标或精确运行的最终回复；旧版 `dim exec` |
+| Codex | `Stop.last_assistant_message`；临时、只读的 `codex exec` |
+| Claude Code | Stop 助手回复；`claude -p --safe-mode`，无工具 |
+| OpenCode | 空闲时的助手文本；拒绝工具权限的 `opencode run` |
+| Pi | `agent_settled` 时的助手文本；无工具和扩展的 `pi --print` |
+| DeepSeek Harness | 真正 idle 时的助手文本；进程内 LLM service |
+
+原生 CLI 需已安装、已登录并支持所用参数，特别是 Claude Code 的 `--safe-mode`。会话模型标识不足时不会随意选择其他模型。原生调用跟随模型 ID，不保证继承会话的推理强度等全部参数。
+
+### 外部 OpenAI-compatible 服务
+
+```sh
+adp config set service openai-compatible --agent dimagent
+adp config set baseUrl 'https://your-provider.example/v1' --agent dimagent
+adp config set model 'your-model-id' --agent dimagent
+adp config set apiKeyEnv PRESENCE_API_KEY --agent dimagent
+```
+
+端点需接受 `/chat/completions` 和 JSON object 响应格式。远程端点需要 HTTPS；本地无认证服务可使用 localhost HTTP 并将 `apiKeyEnv` 设为空字符串。配置只保存环境变量名称，不保存 key。
+
+对 Codex、Claude Code、OpenCode、Pi、旧版 DimAgent 及 Harness 外部摘要，key 需在 **ADP daemon** 的环境中。Dim Rust 的外部摘要在其原生插件中执行，key 需在 **Dim daemon** 的环境中。变更环境变量后重启对应进程。
+
+恢复跟随会话时，将 `service` 设为 `session`，并把 `model`、`provider` 设为空字符串；如果原本没有更高层覆盖，也可 `unset` 对应字段。
+
+### 数据与持久化
+
+完成摘要最多使用 4,000 个字符的助手正文，排除推理和工具内容。旧版 DimAgent 的早期目标标题另使用最多 2,000 个字符的过滤后用户请求。其元数据和 export 读取范围比最终传给模型的文本更大，详见旧版接入部分。
+
+源正文不写入 ADP 会话状态或 status 输出，排队中的正文在处理后丢弃。选定的模型服务会收到摘要输入；原生 CLI 可能保留自己的历史和日志，特别是旧版 DimAgent 辅助会话与 OpenCode summary 会话。摘要也会消耗模型用量。提示词和常见字段过滤不能保证所有私密信息都被语义脱敏。
+
+生成的摘要只保存在 ADP 内存中；重启服务后由后续回复重新产生。模型失败时保留原有标题和生命周期显示。CLI worker 的计数与诊断可见于 `adp status`；Harness 和 Dim Rust 的原生辅助任务由各自插件管理。
+
+<a id="display"></a>
+## 图标与显示
+
+默认卡片标题为摘要 `topic`，详情为生命周期状态，第三行为 `subtitle`，计时器显示观察到的会话起点。缺少摘要时使用 `Coding with AGENT` 等默认文字。
+
+```sh
+adp config set presence.name '{agent}: {topic}' --agent dimagent
+adp config set presence.details '{phase} · {subtitle}' --agent dimagent
+adp config set presence.state '与 Dim 一起写代码' --agent dimagent
+```
+
+可用模板为 `{topic}`、`{subtitle}`、`{agent}`、`{phase}`、`{state}`，只展开文本与按钮标签，URL 和 asset key 保持原值。
+
+<a id="dim-alpha-icon"></a>
+### Dim α 彩虹图标
+
+这是可选的个人显示配置；安装适配器不会自动覆盖原始图标。图像在 Dim 绿色标志右下角加入彩虹 α，悬浮说明为 `Dim α`。该标记由本 fork 制作，用于区分 Rust alpha。
+
+```sh
+adp config set presence.assets.large_image 'https://raw.githubusercontent.com/weiuou/agent-discord-presence/c3a8ec3e5dc3c1532ad0da47d82195fff2193305/dim-rust-alpha-rainbow.png' --agent dimagent
+adp config set presence.assets.large_text 'Dim α' --agent dimagent
+```
+
+<img src="https://raw.githubusercontent.com/weiuou/agent-discord-presence/c3a8ec3e5dc3c1532ad0da47d82195fff2193305/dim-rust-alpha-rainbow.png" width="96" alt="Dim α 彩虹图标">
+
+该 PNG 位于本 fork 的独立资源分支 `codex/dim-alpha-icon`，上述 URL 固定到文件所在提交。也可使用自己的公开 HTTPS 图床或当前 Discord application 的 asset key。Discord 无法读取本机文件路径或 data URL。两代 Dim 共用该配置，若同时运行，也会使用相同图标覆盖。
+
+### 其他显示字段
+
+| 字段 | 用途 |
+| --- | --- |
+| `presence.assets.large_image` / `small_image` | 公开 HTTPS 图像或当前 application 的 asset key |
+| `presence.assets.large_text` / `small_text` | 图标悬浮说明 |
+| `presence.assets.large_url` / `small_url` | 图标链接 |
+| `presence.name` / `details` / `state` | 标题、详情、第三行文本 |
+| `presence.details_url` / `state_url` | 详情或状态链接 |
+| `presence.type` | `0` Playing、`2` Listening、`3` Watching、`5` Competing |
+| `presence.status_display_type` | 紧凑标签使用 `0` name、`1` state 或 `2` details |
+| `presence.timestamps` | Unix 秒级 start/end；start 也支持 `"session"` |
+| `presence.buttons` | 最多两个 `{label, url}` 按钮 |
+| `presence.party` | party id 和 `[current, maximum]` 大小 |
+
+链接使用 HTTPS。文本上限 128 个 Unicode 字符，按钮标签上限 32；展开后过长的模板会截断。将 `details`、`state`、`timestamps` 或 `assets` 设为 `null` 可隐藏相应部分；`buttons: []` 移除按钮。
+
+```sh
+adp config set presence.state null --agent dimagent
+adp config set presence.assets null --agent dimagent
+adp config unset presence.assets --agent dimagent
+adp config unset presence --agent dimagent
+```
+
+`unset` 恢复继承值，修改显示不调用模型。有效设置通常约一秒内重新读取，再按 Discord 发送间隔更新，通常最多再等待五秒。
+
+### 手动摘要
+
+从 `status` 复制完整 key，再指定已经准备好公开的文本：
 
 ```sh
 adp status
-adp pin 'codex:SESSION_ID'
+adp summary 'dimagent:SESSION_KEY' '适配 Dim 原生插件' '检查状态与摘要'
+adp clear-summary 'dimagent:SESSION_KEY'
+```
+
+示例中的 `SESSION_KEY` 必须替换为真实 key 的后半部分，Rust 版包含 `rust:…`。标题必填、副标题可选，手动字段最长 120 个字符。手动摘要不延长会话存活期，也不改变会话选择优先级。
+
+模型集成可使用包根导出的 `summaryTarget` / `publishSummary`；在生成前捕获目标，再提交校验过的 `{topic, subtitle}`。提示词构造器导出为 `agent-discord-presence/prompts`。
+
+<a id="sessions"></a>
+## 会话选择与清理
+
+```sh
+adp status
+adp pin 'dimagent:SESSION_KEY'
 adp unpin
 ```
 
-Copy an exact session key from `status`. Working/waiting sessions rank above errors, then idle sessions. Within a rank, the most recently updated session wins. Heartbeats do not change that ordering. Elapsed time measures the observed session lifetime, including idle time, rather than billable agent execution time.
+未固定时，Working / Waiting 优先于 Error，再优先于 Idle；同一优先级选择最近发生状态变化的会话。心跳不会抢占选择顺序。计时包含观察到的空闲时间，不代表模型计费时间。
 
-OpenCode, Pi, and DeepSeek Harness adapters send a heartbeat every 20 seconds with their host PID. The service removes their sessions after 90 seconds without a heartbeat or when that process exits. OpenCode disposal, Pi shutdown, and Harness plugin unload stop their timers. A daemon restart recovers extension sessions on the next heartbeat.
+OpenCode、Pi、Harness 和 Dim Rust 属于进程内扩展，每 20 秒发送带 host PID 的心跳。进程退出或超过 90 秒没有心跳时清理；Session / 插件的正常关闭也会释放 reporter。ADP 重启后可在下一次心跳恢复状态。
 
-`idleMinutes` optionally shortens the display time for idle command-hook sessions. Set `adp config set idleMinutes 5 --agent dimagent` to hide completed DimAgent sessions five minutes after the last hook; new tasks automatically restore presence. Working/waiting sessions keep the normal `--stale-minutes` timeout. The default `idleMinutes: 0` uses the normal timeout for idle too. Positive values must be whole minutes from 1 to 1440, remain capped by the normal timeout, and hot reload without restarting. Summary updates do not extend the idle deadline; hiding does not close the agent conversation. Extension sessions with PID/heartbeat leases retain their separate lifecycle.
+Codex、Claude Code 和旧版 DimAgent 的命令 hooks 没有可信的常驻 host PID，依赖生命周期事件和静默超时，默认 30 分钟。长时间无事件的模型调用可能需要增大 `--stale-minutes`。
 
-Command hooks are short-lived and do not provide a trustworthy host PID, so Codex and Claude Code use lifecycle end events plus a 30-minute silence timeout. Change it with `start --stale-minutes 60`. A long silent model request can exceed that timeout; increase it for long-running work. Hooks resume reporting on the next lifecycle event after a daemon restart. Focus changes are not tracked.
+`idleMinutes` 只缩短**命令 hook 会话**的空闲保留时间，且不会超过总静默超时。Dim Rust 使用心跳租约，因此即使共享 `dimagent` 配置，也不使用这个空闲 hook 超时。摘要更新不会延长租约，窗口焦点不参与选择。
 
-`PermissionRequest` reports waiting; subsequent tool/turn events restore activity. A permission rejected without a follow-up event may remain waiting until another lifecycle event or expiry. Hook start timestamps suppress older arrivals, but hooks do not expose a universal sequence number; simultaneous events and other hooks that continue a `Stop` can cause transient state inaccuracies. This adapter is an activity indicator, not a scheduler or accounting source.
+<a id="troubleshooting"></a>
+## 排查问题
 
-## Configuration and platform notes
-
-| Setting | Purpose |
+| 现象 | 检查项 |
 | --- | --- |
-| `--client-id` / `DISCORD_CLIENT_ID` | Discord application ID |
-| `--socket` / `AGENT_PRESENCE_SOCKET` | Override the local service socket; use the same path in agents and daemon |
-| `DISCORD_IPC_PATH` | Override Discord socket discovery, useful for sandboxed Discord installs |
-| `--stale-minutes` | Hook inactivity timeout, 1–1440 minutes |
-| `--dry-run` | Print activity JSON instead of connecting to Discord |
+| `adp` 仍是旧版本 | 检查 PATH；Windows 用 `Get-Command adp`，POSIX 用 `command -v adp`，再从此 fork 重新构建安装 |
+| 无法连接服务 | 先启动 ADP，并确认客户端与服务使用相同 socket / 配置环境 |
+| Discord 未连接 | 检查桌面客户端是否登录、IPC 是否可达、Application ID 是否有效 |
+| Discord 已连接但无卡片 | 检查 `sessions`；执行真实 Agent 任务验证适配，不要只检查连接 |
+| Dim 插件 pending | 检查 `dima runtime list` 和 `dima plugin list`，等待安装或处理 runtime 错误 |
+| Windows Node runtime 退出 | 参照 alpha.19 的路径兼容步骤，并重启 Dim daemon |
+| 状态正常但无摘要 | 检查 `enabled`、service、模型路由、登录状态和执行摘要进程的环境变量 |
+| 图标缺失 | 确认 URL 可匿名返回 PNG，或 asset key 属于当前 application；再等待客户端刷新 |
+| 旧版 DimAgent 导出失败 | 检查 `ADP_DIMAGENT_COMMAND` 与 `DIMCODE_HOME` 是否对应任务所在客户端 |
+| 活动一直 Waiting / Idle | 检查该客户端 hook 契约的事件限制、是否收到新事件、是否已过期 |
 
-The runtime has no production npm dependencies. Unix uses a per-user directory and a mode-0600 socket; Windows uses a named pipe. These interfaces are for trusted local processes. Do not expose them directly to the network. macOS/Linux socket transport is covered by automated tests; Windows pipe support needs testing on Windows. The absolute-path hook generator currently targets POSIX shells; use the bundled PATH-based hooks on Windows.
+错误配置可通过 `adp config show --agent NAME` 检查；配置文件损坏时 daemon 会在 `settingsError` 中报告。原生插件为避免干扰宿主会吞掉辅助调用异常，status 的 CLI 计数不覆盖所有插件内任务。
 
-SSH, containers, and remote agent services cannot reach the desktop Discord socket automatically. Run the daemon on the desktop and arrange an explicit local socket forwarding mechanism before using remote adapters. That forwarding is outside this first version.
-
-## Development
-
-From a source checkout, install dependencies and build:
-
-```sh
-npm install
-npm run build
-node dist/cli.js start
-```
-
-When running from this checkout without a global installation, replace `adp` in the examples above with `node dist/cli.js`. Rebuild after source changes, and regenerate adapter configuration if you move the checkout.
-
-Run the checks:
+<a id="verification"></a>
+## 开发与验证
 
 ```sh
-npm test
 npm run check
+npm test
 npm pack --dry-run
 ```
 
-Tests cover multi-session arbitration, stale events and leases, protocol validation/privacy, CLI hooks through the real service socket, adapter lifecycle contracts, and a fake Discord server (fragmentation, PING/PONG, acknowledgements, coalescing, reconnection and clearing). Contract tests do not replace live validation inside each agent version.
+测试覆盖会话仲裁、过期事件、心跳租约、配置继承、IPC、hooks、适配器生命周期、摘要失效，以及模拟 Discord 的确认、重连和清理。2026-11-05 的当前修订在 Windows / Node 24.13.0 上运行了 62 项测试。测试数量会随修订变化。
 
-Run integration tests in an environment that permits local socket listening and connections. The 27 tests pass on Node 26.8.2 on macOS, including background startup and graceful shutdown through the CLI. Live Discord returned the requested custom summary title and acknowledged clearing the activity. A repeatable live check is available (it briefly changes your activity and then clears it):
+隔离验证使用本地模型 fixture 与模拟 Discord，不需要真实模型 key：
 
 ```sh
-node scripts/smoke-discord.mjs
+node scripts/smoke-dim.mjs /absolute/path/to/Rust/dimcode
+node scripts/smoke-dimagent.mjs /absolute/path/to/legacy/dim
+node scripts/smoke-dimagent.mjs /absolute/path/to/legacy/dim --external
 ```
+
+另有 `scripts/smoke-generation.mjs` 和 `scripts/smoke-discord.mjs`。前者使用已登录的模型客户端，可能产生模型用量；后者会短暂改变真实 Discord 活动，再清除。
+
+| 范围 | 已有验证证据 |
+| --- | --- |
+| Dim Rust `0.1.0-alpha.19` / Windows x64 | 官方二进制跑通 runtime、插件加载、Working / Idle 与原生完成摘要；隔离模型及 Discord fixture |
+| Dim Rust 的真实桌面显示 | 本机已连接真实 Dim 会话；Discord 实际显示摘要卡片和自定义彩虹 α 图标 |
+| DimAgent 0.5.21 / Node 24.13.0 | 插件、hooks、目标标题、完成摘要和手动摘要通过隔离 CLI 验证 |
+| Desktop 0.9.56 的 bundled CLI 0.5.20 | bundled CLI 的隔离流程通过，Desktop 加载代码已检查；不据此宣称完整 GUI 授权流程通过 |
+| DeepSeek Harness | 对照 `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720` 的契约，模拟宿主与实际 ADP 服务验证；尚无完整客户端实测 |
+| Codex | 当前环境有原生摘要实测记录及 IPC / hooks 测试 |
+| Claude Code、OpenCode、Pi | 有适配契约与集成测试；当前 fork 记录中缺少各客户端完整实机验证 |
+
+Dim Rust 接口参考为 `arcships/dim` 的 `43f2c84b516cead46b75a739843c48294aea6d50` 修订。客户端升级后应重新检查契约。上述实测记录是特定环境的证据，不能代表所有平台和账号组合。
+
+新增适配器应通过 `emit` / `Reporter` 接入共享服务，避免在适配器里另外建立 Discord 连接。
 
 ```text
-src/
-  protocol.ts       Versioned, allowlisted event protocol
-  store.ts          Selection, pinning, expiry and ordering
-  client.ts         Local IPC client and extension heartbeat reporter
-  daemon.ts         Shared service
-  discord.ts        Discord IPC framing and connection state
-  cli.ts            Foreground service, status, config and hooks
-  adapters/         Codex/Claude hooks, OpenCode/Harness plugins, Pi extension
-plugins/            Distributable Codex and Claude Code plugin wrappers
+src/adapters/       各客户端适配器，含独立的 dim.ts
+src/client.ts       IPC 客户端与心跳 reporter
+src/daemon.ts       共享本地服务
+src/store.ts        会话仲裁、固定和清理
+src/discord.ts      Discord IPC
+plugins/            可安装的客户端插件包装
+prompts/            摘要提示词
+presets.json        内置配置预设
+test/               自动化验证
+scripts/            实机与隔离 smoke 检查
 ```
 
-Future adapters should emit protocol-v1 state events through `emit` or `Reporter`; they should not own a Discord connection.
+## 来源与许可
 
-Official API references reviewed on 2026-09-15:
-
-- [Codex hooks](https://learn.chatgpt.com/docs/hooks)
-- [Claude Code hooks](https://code.claude.com/docs/en/hooks) and [plugins](https://code.claude.com/docs/en/plugins-reference)
-- [OpenCode plugins](https://opencode.ai/docs/plugins/)
-- [Pi extensions](https://pi.dev/docs/latest/extensions)
-- [Discord IPC RPC](https://docs.discord.com/developers/topics/rpc)
+基础实现来自 [LitoMore/agent-discord-presence](https://github.com/LitoMore/agent-discord-presence)，感谢原作者及贡献者。摘要表达方式也参考了原文档注明的 [Cola Discord Presence](https://github.com/LitoMore/cola-plugin-discord-presence)。本 fork 保留原版权声明和 [MIT License](LICENSE)，由 [weiuou](https://github.com/weiuou) 继续维护。

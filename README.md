@@ -61,6 +61,23 @@ dima plugin list
 
 将路径换成此 fork 的真实目录。等待 Node runtime 为 `ready`、ADP 插件为 `running` 后启动 `dima`；首次使用需在 Dim 中登录或配置模型。Windows alpha.19 的路径兼容处理见 [接入指南](USAGE.md#dim-windows)。
 
+## Desktop app
+
+A native Go desktop app built with MyGo provides live session selection, per-agent appearance and summary settings, a Discord profile-card preview, and a tray quick panel. Both windows use MyGo's GPU-rendered UI toolkit, with no webview or JavaScript frontend.
+
+From a source checkout, install [Go 1.27.4+](https://go.dev/dl/) and Node.js 22+, then run:
+
+```sh
+npm install
+npm run desktop:install
+npm run desktop
+```
+
+Use **Agents → Setup** to copy an installation-specific prompt for your agent, or switch to **Manual configuration** to copy the hook or plugin configuration directly. The app shares the CLI's configuration and local socket. Closing the window keeps the app in the tray; quitting the app leaves the background service running. Use **Stop service** to stop it and clear its Discord activity.
+
+See the [desktop development guide](apps/desktop/README.md) for builds and the project structure.
+
+
 停止 ADP：
 
 ```sh

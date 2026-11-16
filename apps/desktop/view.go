@@ -1,12 +1,37 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/sebasvil20/templicons/i"
+	"github.com/sebasvil20/templicons/tabler"
 )
+
+func tablerIcon(icon func(...i.Props) templ.Component) *ui.SVG {
+	var svg bytes.Buffer
+	if err := icon(i.Props{StrokeWidth: "1.6"}).Render(context.Background(), &svg); err != nil {
+		panic(err)
+	}
+	return ui.MustParseSVG(svg.Bytes())
+}
+
+var icons = map[string]*ui.SVG{
+	"chevron":     tablerIcon(tabler.ChevronDown),
+	"radio":       tablerIcon(tabler.Broadcast),
+	"Overview":    tablerIcon(tabler.Activity),
+	"Agents":      tablerIcon(tabler.LayoutGrid),
+	"Appearance":  tablerIcon(tabler.Palette),
+	"Summaries":   tablerIcon(tabler.Sparkles),
+	"Preferences": tablerIcon(tabler.AdjustmentsHorizontal),
+	"pin":         tablerIcon(tabler.Pin),
+	"game":        tablerIcon(tabler.DeviceGamepad),
+}
 
 var navPages = []string{"Overview", "Agents", "Appearance", "Summaries"}
 var descriptions = map[string]string{"Overview": "Your agents at work, at a glance.", "Agents": "Connect once. Keep your work in sync.", "Appearance": "Make every line feel like you.", "Summaries": "Turn your work into a clear, concise activity.", "Preferences": "Manage appearance and your local service."}

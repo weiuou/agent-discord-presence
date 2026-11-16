@@ -2,7 +2,11 @@ module github.com/LitoMore/agent-discord-presence/apps/desktop
 
 go 1.27.4
 
-require github.com/egoist/mygo v0.9.0
+require (
+	github.com/a-h/templ v0.3.857
+	github.com/egoist/mygo v0.9.0
+	github.com/sebasvil20/templicons v1.1.0
+)
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect

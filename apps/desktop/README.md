@@ -46,12 +46,9 @@ apps/desktop/
   bridge.go                Serialized, bounded bridge to the Node worker
   state.go                 Native application model, commands, and image cache
   view.go                  Main window, native forms, dialogs, and tray panel
-  icons.go                 Embedded Tabler Icons for navigation and shared controls
   mygo.json                Native app configuration and packaged resources
 prototypes/                Original interface exploration
 ```
-
-Navigation and shared controls use locally embedded [Tabler Icons](assets/tabler/README.md), with the pinned source version and license alongside the SVGs.
 
 The backend remains the source of truth. Settings save only on request, invalid configuration files remain untouched, and reset actions preserve unrelated settings. Forms support global and individual agent scopes. The live preview shows the daemon's rendered activity; unsaved appearance changes render locally and are labeled as a preview.
 

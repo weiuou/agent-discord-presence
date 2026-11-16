@@ -8,21 +8,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func vector(paths string) *ui.SVG {
-	return ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">` + paths + `</svg>`))
-}
-
-var icons = map[string]*ui.SVG{
-	"chevron":     vector(`<path d="m5 9 7 7 7-7"/>`),
-	"radio":       vector(`<circle cx="12" cy="12" r="2"/><path d="M8 7a7 7 0 0 0 0 10m8-10a7 7 0 0 1 0 10M5 4a11 11 0 0 0 0 16M19 4a11 11 0 0 1 0 16"/>`),
-	"Overview":    vector(`<path d="M2 12h5l3-8 4 16 3-8h5"/>`),
-	"Agents":      vector(`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>`),
-	"Appearance":  vector(`<path d="M12 3a9 9 0 1 0 0 18h2a2 2 0 0 0 1-4c-2-1-1-3 1-3h2a3 3 0 0 0 3-3 9 9 0 0 0-9-8z"/><circle cx="7" cy="11" r=".7"/><circle cx="10" cy="7" r=".7"/><circle cx="15" cy="8" r=".7"/>`),
-	"Summaries":   vector(`<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5zM20 2v4m-2-2h4"/>`),
-	"Preferences": vector(`<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>`),
-	"pin":         vector(`<path d="m15 3 6 6-4 1-3 5-2 1-4-4 1-2 5-3zM9 15l-6 6"/>`),
-	"game":        vector(`<path d="M7 7h10c3 0 4 12 2 12l-4-4H9l-4 4C3 19 4 7 7 7zM7 10v4m-2-2h4M16 11h.1M18 13h.1"/>`),
-}
 var navPages = []string{"Overview", "Agents", "Appearance", "Summaries"}
 var descriptions = map[string]string{"Overview": "Your agents at work, at a glance.", "Agents": "Connect once. Keep your work in sync.", "Appearance": "Make every line feel like you.", "Summaries": "Turn your work into a clear, concise activity.", "Preferences": "Manage appearance and your local service."}
 

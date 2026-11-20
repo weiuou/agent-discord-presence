@@ -42,7 +42,7 @@
     "desktop:check": "go -C apps/desktop vet ./...",
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "npm run build && node --test test/*.test.js",
+    "test": "npm run build && node --import ./test/isolate-npm-plugins.js --test test/*.test.js",
     "start": "node dist/cli.js start",
     "prepack": "npm run build"
   },

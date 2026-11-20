@@ -12,6 +12,7 @@ import {selectEvents, scenarioSelection, validateSummaryTriggers} from './integr
 import {entryContent} from './integration-config.js';
 import {listAgents, listPlugins, installPlugin, changePlugin, getPlugin, pluginSetup, pluginPolicy} from './agent-plugins.js';
 import {startPluginInstall, cancelPluginInstall, pluginInstallState} from './plugin-install.js';
+import {refreshGlobalNpmPlugins} from './npm-plugins.js';
 
 const cli = fileURLToPath(new URL('./cli.js', import.meta.url));
 const quote = (s: string) => "'" + s.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''") + "'";
@@ -21,6 +22,7 @@ function scopeAgent(scope: SettingsScope): Agent | undefined {
   return scope;
 }
 export async function desktopSnapshot(): Promise<DesktopSnapshot> {
+  await refreshGlobalNpmPlugins();
   let status: ServiceStatus | null = null;
   let serviceError: string | null = null;
   try { status = await request({type: 'status'}, undefined, 1500) as ServiceStatus; }

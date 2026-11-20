@@ -34,22 +34,22 @@ func (a *nativeApp) openPluginInstaller() {
 			a.pluginSourcePreviousJob = a.data.PluginInstall.ID
 		} else {
 			a.pluginSource = a.data.PluginInstall.Spec
-			a.pluginSourceLocal = !strings.HasPrefix(a.pluginSource, "github:")
+			a.pluginSourceLocal = !strings.HasPrefix(a.pluginSource, "github:") && !strings.HasPrefix(a.pluginSource, "npm:")
 		}
 	}
 }
 func (a *nativeApp) pluginInstallDialog(c *ui.Context) {
 	ui.Modal(c, &a.pluginSourceOpen, func() {
 		ui.Column(c.Key("github-plugin-source")).Width(520).MaxWidthPercent(100).Gap(14).Children(func() {
-			title := "Install from GitHub…"
+			title := "Install from GitHub or npm…"
 			if a.pluginSourceLocal {
 				title = "Install an Agent plugin"
 			}
 			ui.Text(c, a.t(title)).FontSize(19).FontWeight(600)
 			if !a.pluginSourceLocal {
-				caption := ui.Text(c, a.t("GitHub source")).FontSize(12)
-				ui.TextInput(c, &a.pluginSource).LabelledBy(caption).Placeholder("github:OWNER/REPO#REF").MaxLength(4096).FillWidth().Disabled(a.busy || a.installingPlugin())
-				muted(c, a.t("Public repositories only. Branch, tag, or commit is optional.")).FontSize(10)
+				caption := ui.Text(c, a.t("Plugin source")).FontSize(12)
+				ui.TextInput(c, &a.pluginSource).LabelledBy(caption).Placeholder("github:OWNER/REPO#REF or npm:PACKAGE").MaxLength(4096).FillWidth().Disabled(a.busy || a.installingPlugin())
+				muted(c, a.t("Use GitHub or a globally installed npm package. Global npm plugins are also detected automatically.")).FontSize(10)
 			}
 			if a.data != nil && a.data.PluginInstall != nil && a.data.PluginInstall.ID != a.pluginSourcePreviousJob {
 				a.pluginInstallProgress(c)
@@ -63,8 +63,8 @@ func (a *nativeApp) pluginInstallDialog(c *ui.Context) {
 					ui.PrimaryButton(c, a.t("Install plugin")).Disabled(a.busy || a.installingPlugin() || strings.TrimSpace(a.pluginSource) == "").OnClick(func() {
 						a.pluginSourceError = ""
 						source := strings.TrimSpace(a.pluginSource)
-						if !strings.HasPrefix(source, "github:") {
-							a.pluginSourceError = "Use github:OWNER/REPO or github:OWNER/REPO#REF"
+						if !strings.HasPrefix(source, "github:") && !strings.HasPrefix(source, "npm:") {
+							a.pluginSourceError = "Use github:OWNER/REPO[#REF] or npm:PACKAGE"
 							return
 						}
 						a.dispatch(map[string]any{"action": "plugin-install-start", "source": source}, "")
@@ -80,6 +80,9 @@ func (a *nativeApp) pluginInstallProgress(c *ui.Context) {
 	}
 	s := a.data.PluginInstall
 	labels := map[string]string{"resolving": "Resolving repository…", "downloading": "Downloading plugin…", "validating": "Checking plugin…", "installing": "Installing plugin…", "registering": "Registering plugin…", "cancelling": "Cancelling installation…", "installed": "Installed · waiting for Agent integration", "failed": "Plugin installation failed", "cancelled": "Plugin installation cancelled"}
+	if strings.HasPrefix(s.Spec, "npm:") {
+		labels["resolving"] = "Finding global npm package…"
+	}
 	ui.Column(c.Key("plugin-install-progress")).Gap(8).Padding(12).Background(c.Theme().Surface).Radius(7).Margin(0, 0, 16, 0).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, a.t(labels[s.Phase])).FontSize(12).Grow(1)

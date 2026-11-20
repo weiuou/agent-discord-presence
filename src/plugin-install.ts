@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {installPlugin, type PluginSource} from './agent-plugins.js';
 import {fetchGithubPlugin, parseGithubSource} from './github-plugin.js';
+import {parseNpmSource, resolveNpmPlugin} from './npm-plugins.js';
 
 export interface PluginInstallState {
   id: string; spec: string; phase: 'resolving' | 'downloading' | 'validating' | 'installing' | 'registering' | 'cancelling' | 'installed' | 'failed' | 'cancelled';
@@ -12,10 +13,11 @@ export interface PluginInstallState {
 export function installFinished(state: PluginInstallState): boolean {return ['installed', 'failed', 'cancelled'].includes(state.phase);}
 
 export function installPluginSource(spec: string, progress: (state: PluginInstallState) => void = () => {}, signal?: AbortSignal): Promise<string> {
-  if (typeof spec !== 'string' || !spec.trim() || spec.length > 4096) throw new Error('Enter a GitHub source or select a local plugin folder');
+  if (typeof spec !== 'string' || !spec.trim() || spec.length > 4096) throw new Error('Enter a GitHub or npm source, or select a local plugin folder');
   if (spec.startsWith('github:')) parseGithubSource(spec);
+  if (spec.startsWith('npm:')) parseNpmSource(spec);
   const id = randomUUID(), combined = AbortSignal.any([AbortSignal.timeout(120_000), ...signal ? [signal] : []]);
-  let state: PluginInstallState = {id, spec, phase: spec.startsWith('github:') ? 'resolving' : 'validating'};
+  let state: PluginInstallState = {id, spec, phase: /^(github|npm):/.test(spec) ? 'resolving' : 'validating'};
   const report = (phase: PluginInstallState['phase'], extra: Partial<PluginInstallState> = {}) => {
     state = {id, spec, phase, ...extra}; progress({...state});
   };
@@ -27,6 +29,9 @@ export function installPluginSource(spec: string, progress: (state: PluginInstal
       if (spec.startsWith('github:')) {
         temp = await mkdtemp(join(tmpdir(), 'adp-plugin-')); root = temp;
         source = await fetchGithubPlugin(spec, root, combined, (phase, bytes, total) => report(phase, {bytes, total}));
+      } else if (spec.startsWith('npm:')) {
+        const installed = await resolveNpmPlugin(spec); root = installed.root; source = installed.source;
+        report('validating');
       }
       combined.throwIfAborted(); report('installing');
       agent = await installPlugin(root, {signal: combined, source, registering: () => report('registering')});

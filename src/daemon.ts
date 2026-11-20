@@ -12,10 +12,12 @@ import {buildPresencePrompt} from './prompts.js';
 import {boundedResponse} from './completion.js';
 import {nativeSummarySettings, type NativeSummaryJob} from './native-summary.js';
 import {agentEnabled, agentName} from './agent-plugins.js';
+import {refreshGlobalNpmPlugins} from './npm-plugins.js';
 import type {DiscordProfile} from './desktop-protocol.js';
 export interface Transport {status: string; readonly acknowledged?: boolean; readonly user?: DiscordProfile | null; start(): void; setActivity(activity: Activity | null): void; stop(): void}
 export async function startDaemon(options: {clientId?: string; dryRun?: boolean; path?: string; staleMs?: number;
   transport?: Transport; log?: (message: string) => void; generate?: Generate; generationTimeoutMs?: number} = {}) {
+  await refreshGlobalNpmPlugins();
   const path = options.path ?? socketPath();
   const log = options.log ?? console.log;
   const clientId = options.clientId ?? DISCORD_CLIENT_ID;
@@ -148,10 +150,12 @@ export async function startDaemon(options: {clientId?: string; dryRun?: boolean;
   server.on('error', error => log(`Presence service: ${error.message}`));
   transport.start(); refresh();
   const ticker = setInterval(refresh, 1000);
+  const npmTicker = setInterval(() => {void refreshGlobalNpmPlugins();}, 10_000);
+  npmTicker.unref();
   let closing: Promise<void> | undefined;
   function close(reply?: Socket): Promise<void> {
     return closing ??= (async () => {
-      clearInterval(ticker); transport.stop();
+      clearInterval(ticker); clearInterval(npmTicker); transport.stop();
       const closed = new Promise<void>(resolve => server.close(() => resolve()));
       await generation.close();
       for (const socket of sockets) if (socket !== reply) socket.destroy();

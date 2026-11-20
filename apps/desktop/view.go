@@ -370,7 +370,7 @@ func (a *nativeApp) agentsView(c *ui.Context) {
 	ui.Row(c).AlignItems(ui.Center).Gap(12).Margin(0, 0, 14, 0).Children(func() {
 		ui.Text(c, a.t("Your agents")).FontSize(13).FontWeight(600).Grow(1)
 		muted(c, a.t("%d agents", len(a.agents())))
-		installLabel := "Install from GitHub…"
+		installLabel := "Install from GitHub or npm…"
 		if a.installingPlugin() {
 			installLabel = "Installation progress…"
 		}

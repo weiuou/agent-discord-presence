@@ -12,13 +12,14 @@ export interface AgentDescriptor {
   locales?: Record<string, Record<string, string>>;
   source?: PluginSource;
 }
-export interface PluginSource {type: 'github'; spec: string; commit: string}
+export type PluginSource = {type: 'github'; spec: string; commit: string}
+  | {type: 'npm-global'; spec: string; package: string; version: string; path: string};
 interface Manifest {apiVersion: 1; id: string; name: string; version: string; description?: string;
   icon?: string; presenceImage?: string; extension?: string; summaryWorker?: string;
   integration?: {kind: 'policy'; events: IntegrationEvent[]; removalInstructions: string};
   locales?: Record<string, Record<string, string>>;
   setup?: {kind: 'manual'; instructions: string; command?: string[]}}
-interface Installation {path: string; enabled: boolean; installed: boolean; source?: PluginSource}
+interface Installation {path: string; enabled: boolean; installed: boolean; source?: PluginSource; npmSuppressed?: boolean}
 interface Catalog {version: 1; plugins: Record<string, Installation>}
 export interface AgentPlugin extends AgentDescriptor {root: string; manifest: Manifest}
 const manifestCache = new Map<string, {stamp: string; value: Manifest}>();
@@ -187,15 +188,21 @@ function checkPackage(root: string): void {
   }
   scan(root);
 }
-export async function installPlugin(source: string, options: {signal?: AbortSignal; source?: PluginSource; registering?: () => void} = {}): Promise<string> {
+export async function installPlugin(source: string, options: {signal?: AbortSignal; source?: PluginSource; automatic?: boolean; registering?: () => void} = {}): Promise<string> {
   if (typeof source !== 'string' || !source || source.length > 4096) throw new Error('Select a local plugin folder');
   const root = realpathSync(source); const m = readPlugin(root); checkPackage(root);
   options.signal?.throwIfAborted();
   return withPluginLock(async () => {
     if (listAgents().some(a => a.id !== m.id && a.name.trim().toLocaleLowerCase() === m.name.trim().toLocaleLowerCase())) throw new Error('Another Agent already uses this display name');
     const data = state();
+    const previous = data.plugins[m.id];
+    const npm = options.source?.type === 'npm-global' ? options.source : undefined;
+    if (options.automatic && previous) {
+      if (previous.source?.type !== 'npm-global' || previous.npmSuppressed || previous.source.package !== npm?.package) return m.id;
+      if (previous.installed && previous.source.version === npm?.version && previous.source.path === npm?.path) return m.id;
+    }
     if (Object.values(data.plugins).filter(p => p.installed).length >= 16 && !data.plugins[m.id]?.installed) throw new Error('At most 16 local Agent plugins can be installed');
-    if (data.plugins[m.id]?.installed) throw new Error('Plugin is already installed; remove it before installing another copy');
+    if (previous?.installed && !options.automatic) throw new Error('Plugin is already installed; remove it before installing another copy');
     // A unique managed copy survives changes to the selected source directory.
     const dest = join(dirname(pluginStatePath()), 'plugins', `${m.id}-${randomUUID()}`);
     await mkdir(dirname(dest), {recursive: true});
@@ -204,7 +211,7 @@ export async function installPlugin(source: string, options: {signal?: AbortSign
       if (copied.id !== m.id || copied.version !== m.version || copied.name !== m.name) throw new Error('Plugin changed during installation; retry');
       await writeFile(join(dest, '.adp-runtime.json'), JSON.stringify({sdk: new URL('./plugin-sdk.js', import.meta.url).href, config: pluginConfigPath(), socket: socketPath()}));
       options.signal?.throwIfAborted(); options.registering?.();
-      data.plugins[m.id] = {path: dest, installed: true, enabled: true, ...options.source ? {source: options.source} : {}}; await save(data);
+      data.plugins[m.id] = {path: dest, installed: true, enabled: options.automatic && previous ? previous.enabled : true, ...options.source ? {source: options.source} : {}}; await save(data);
       return m.id;
     } catch (error) {await rm(dest, {recursive: true, force: true}); throw error;}
   });
@@ -215,7 +222,8 @@ export async function changePlugin(id: string, action: 'enable' | 'disable' | 'r
   await withPluginLock(async () => {
     const data = state(); const entry = entries()[id]; if (!entry) throw new Error('Unknown plugin');
     if (!entry.installed) throw new Error('Plugin is not installed');
-    data.plugins[id] = {...entry, installed: action !== 'remove', enabled: action === 'enable'};
+    data.plugins[id] = {...entry, installed: action !== 'remove', enabled: action === 'enable',
+      ...entry.source?.type === 'npm-global' && action === 'remove' ? {npmSuppressed: true} : {}};
     if (action === 'enable') {const manifest = readPlugin(entry.path); if (manifest.id !== id) throw new Error('Plugin ID mismatch');}
     await save(data);
   });
@@ -230,4 +238,17 @@ export function pluginSetup(id: string, language = 'en'): {path: string; content
   const args = setup?.command?.map(arg => arg === '{pluginRoot}' ? quote(plugin.root) : /^[A-Za-z0-9_./:-]+$/.test(arg) ? arg : quote(arg));
   const content = args ? (process.platform === 'win32' && args[0].startsWith("'") ? '& ' : '') + args.join(' ') : instructions;
   return {path: '', content, instructions};
+}
+
+export async function pruneMissingNpmPlugins(): Promise<void> {
+  await withPluginLock(async () => {
+    const data = state(); let changed = false;
+    for (const record of Object.values(data.plugins)) {
+      if (record.source?.type === 'npm-global' && record.installed && !existsSync(join(record.source.path, 'package.json'))) {
+        // Preserve enabled=false across uninstall/reinstall; user removals stay suppressed.
+        record.installed = false; changed = true;
+      }
+    }
+    if (changed) await save(data);
+  });
 }

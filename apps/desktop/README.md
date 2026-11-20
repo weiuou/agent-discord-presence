@@ -77,3 +77,8 @@ separately and are not registered by default or copied into the desktop bundle.
 Core agents, including Pi, retain their built-in integrations. The **⋯**
 menu distinguishes removing a plugin from removing its Agent-side integration.
 See [the external plugin guide](../../external-plugins/README.md).
+
+Global npm Agent packages are detected automatically on startup and during
+regular refreshes. Install a package with `npm install -g PACKAGE`, then use
+its Setup action for host integration. The online installer also accepts
+`npm:PACKAGE` for an already installed global package.

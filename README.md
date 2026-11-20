@@ -90,3 +90,8 @@ See [the external plugin guide](external-plugins/README.md).
 ## License
 
 MIT
+
+Global npm packages containing `adp-plugin.json` are detected automatically at
+startup and while ADP is running. Install them with `npm install -g PACKAGE`;
+`adp plugin install npm:PACKAGE` can explicitly import an installed package.
+See the external plugin guide for discovery, updates and removal behavior.

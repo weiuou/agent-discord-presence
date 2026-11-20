@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestGitHubPluginInstallProgressAndCancellation(t *testing.T) {
+func TestRemotePluginInstallProgressAndCancellation(t *testing.T) {
 	for _, width := range []int{760, 1120} {
 		for _, language := range []string{languageEnglish, languageChinese} {
 			a := fixtureApp()
@@ -14,7 +14,7 @@ func TestGitHubPluginInstallProgressAndCancellation(t *testing.T) {
 			var requests []map[string]any
 			a.dispatch = func(r map[string]any, _ string) { requests = append(requests, r) }
 			tt := ui.NewTester(a.view, width, 820)
-			if err := tt.Click(a.t("Install from GitHub…")); err != nil {
+			if err := tt.Click(a.t("Install from GitHub or npm…")); err != nil {
 				t.Fatal(err)
 			}
 			dialog := false
@@ -24,14 +24,18 @@ func TestGitHubPluginInstallProgressAndCancellation(t *testing.T) {
 			if !dialog {
 				t.Fatal("GitHub installation must open in a modal")
 			}
-			if err := tt.Click(a.t("GitHub source")); err != nil {
+			if err := tt.Click(a.t("Plugin source")); err != nil {
 				t.Fatal(err)
 			}
-			tt.Type("github:owner/repo#feature/plugins")
+			source := "github:owner/repo#feature/plugins"
+			if language == languageChinese {
+				source = "npm:@example/agent-plugin"
+			}
+			tt.Type(source)
 			if err := tt.Click(a.t("Install plugin")); err != nil {
 				t.Fatal(err)
 			}
-			if len(requests) != 1 || requests[0]["action"] != "plugin-install-start" || requests[0]["source"] != "github:owner/repo#feature/plugins" {
+			if len(requests) != 1 || requests[0]["action"] != "plugin-install-start" || requests[0]["source"] != source {
 				t.Fatalf("install request: %#v", requests)
 			}
 			a.data.PluginInstall = &pluginInstallState{ID: "download-one", Spec: "github:owner/repo#" + strings.Repeat("a", 240), Phase: "downloading", Bytes: 1024, Total: 2048}
@@ -71,26 +75,26 @@ func TestGitHubPluginInstallProgressAndCancellation(t *testing.T) {
 			if tt.HasText(a.t("Plugin installation failed")) || tt.HasText(a.t(message)) {
 				t.Fatal("closed installation errors must not remain on the Agents page")
 			}
-			if err := tt.Click(a.t("Install from GitHub…")); err != nil {
+			if err := tt.Click(a.t("Install from GitHub or npm…")); err != nil {
 				t.Fatal(err)
 			}
 			a.data.PluginInstall.ID = "download-two"
 			a.data.PluginInstall.Phase, a.data.PluginInstall.Error, a.data.PluginInstall.Agent = "installed", "", "orbit"
 			a.accept(&desktopResponse{Snapshot: a.data})
 			tt.Frame()
-			if a.pluginSourceOpen || a.pluginSource != "" || tt.HasText(a.t("GitHub source")) {
+			if a.pluginSourceOpen || a.pluginSource != "" || tt.HasText(a.t("Plugin source")) {
 				t.Fatal("successful installation did not close and clear the modal")
 			}
 			if tt.HasText(a.t("Installed · waiting for Agent integration")) {
 				t.Fatal("completed installation results must not remain on the Agents page")
 			}
 			saveTestImage(t, tt, "plugin-install-"+language+".png")
-			if err := tt.Click(a.t("Install from GitHub…")); err != nil {
+			if err := tt.Click(a.t("Install from GitHub or npm…")); err != nil {
 				t.Fatal(err)
 			}
 			a.accept(&desktopResponse{Snapshot: a.data})
 			tt.Frame()
-			if !a.pluginSourceOpen || !tt.HasText(a.t("GitHub source")) {
+			if !a.pluginSourceOpen || !tt.HasText(a.t("Plugin source")) {
 				t.Fatal("an earlier installation result closed the reopened modal")
 			}
 		}
@@ -108,7 +112,7 @@ func TestActiveLocalPluginProgressCanBeReopened(t *testing.T) {
 	if err := tt.Click("Installation progress…"); err != nil {
 		t.Fatal(err)
 	}
-	if !tt.HasText("Installing plugin…") || tt.HasText("GitHub source") {
+	if !tt.HasText("Installing plugin…") || tt.HasText("Plugin source") {
 		t.Fatal("local installation did not reopen its progress modal")
 	}
 	if err := tt.Click("Close"); err != nil {

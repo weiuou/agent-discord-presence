@@ -54,6 +54,7 @@ Selected original user requests
 6. "行，看起来行为没啥问题，就是我希望区分哪些是插件哪些是bundle的"
 7. "为什么在windows上会有一个node.exe的cmd？能不能隐藏？做一下适配"
 8. "需要有这么多的测试吗？"
+9. "最好是全局安装npm包后我们的adp就可以自动识别并加载"
 
 These requests evolved during implementation. The initial exploration of
 externalizing integrations was followed by restoring Pi to its upstream behavior.
@@ -79,6 +80,9 @@ Design history
 8. Hide background process windows on Windows. When synchronizing upstream's
    Node discovery changes, preserve that behavior and distinguish POSIX hook
    launchers from PowerShell commands copied from desktop setup dialogs.
+9. Recognize globally installed npm plugin packages automatically. Let npm own
+   downloading and version selection, while ADP supplies managed SDK bindings
+   and preserves explicit disable/remove decisions.
 
 Consolidated development prompt
 ------------------------------
@@ -108,6 +112,8 @@ Core and package responsibilities
 
 - Core owns package validation/registration, session transport, settings,
   activity selection, summary scheduling and generic management UI.
+- Name packages in the external collection adp-plugin-<host>; retain stable
+  ADP IDs independently so npm renames do not discard existing settings.
 - Packages own their IDs, names, icons, host adapters, installation/removal
   instructions, optional event catalogs and host-specific translations.
 - Register external Agents from validated manifests. New host support should
@@ -121,6 +127,10 @@ Core and package responsibilities
 
 Installation and lifecycle
 
+- Detect valid global npm packages at startup and during regular refreshes.
+  Support scoped packages and an explicit npm:PACKAGE import path. Retain user
+  disable/remove decisions across scans, clear activity after npm uninstall,
+  and keep manual local/GitHub installations authoritative for their Agent ID.
 - Installation validates adp-plugin.json and copies the package to an owned,
   stable directory beside ADP configuration. The source folder may then move.
 - Bound package, manifest and icon sizes. Keep referenced files inside the

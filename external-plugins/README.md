@@ -15,7 +15,8 @@ Installed plugins appear in the existing Agents list. Their **⋯** menu enables
 disables or removes the package. Disabling or removing a plugin rejects new
 events, clears its sessions and cancels pending summaries. Removal keeps saved
 settings and Agent-side files. Reinstall by selecting a package folder again.
-No plugin is discovered or enabled merely because it exists on disk.
+Local folders are imported explicitly. Globally installed npm packages with a valid
+`adp-plugin.json` are discovered automatically, as described below.
 
 **Remove integration…** previews changes to the Agent's configuration.
 Custom files are preserved, and changed files require a fresh preview.
@@ -80,3 +81,36 @@ policies enable only required events. After applying changes, restart or reload
 the Agent-side plugin. Partial removal preserves required callbacks and unrelated
 policy fields, backs up existing files, and checks preview revisions. Full
 uninstallation from a host plugin manager follows the package's instructions.
+
+## Global npm packages
+
+Install a self-contained plugin package using `npm install -g PACKAGE`. ADP
+checks the active npm global directory at startup and approximately every ten
+seconds while the service or desktop is running. Only packages containing a
+valid root `adp-plugin.json` are considered; scoped npm packages are supported.
+The npm package and plugin manifest versions must match.
+
+ADP creates a managed copy and supplies its SDK binding, then lists the Agent
+as an enabled Plugin. It never executes the package entry during discovery.
+Follow Setup for the host-side installation and reload steps. Native host
+installation remains a separate operation.
+
+`adp plugin install npm:PACKAGE` (or `npm:@SCOPE/PACKAGE`) explicitly imports a
+package already installed globally. Downloading and selecting a version belong
+to npm; ADP does not download registry packages itself or run lifecycle scripts.
+Use `npm install -g PACKAGE@VERSION` to select a release.
+
+A newer valid package version updates the ADP managed copy. Follow Setup again
+and reload the host to adopt its new copy. Disabled packages stay disabled.
+Removing a package from ADP suppresses automatic reimport until an explicit
+installation through the local/npm installer. `npm uninstall -g PACKAGE` makes
+an automatically managed Agent unavailable and its active sessions are cleared;
+settings and host files remain. A later npm reinstall is discovered again unless
+the user previously removed the package from ADP. Explicit local or GitHub
+installations take precedence over automatic npm discovery of the same Agent ID.
+
+Set `ADP_NPM_ROOT` to override the global `node_modules` directory, or
+`ADP_NPM_AUTOLOAD=0` to disable discovery. Restart ADP after changing these
+variables. Packages must be self-contained within the existing size/file limits.
+A package can use npm's `files` allowlist to include its manifest, adapter,
+assets and license while excluding dependencies and `.adp-runtime.json`.
